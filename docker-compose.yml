@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  valeventas-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: valeventas-app
+    restart: always
+    ports:
+      - "8090:8090"
+    environment:
+      - PORT=8090
+      - NODE_ENV=production
+    volumes:
+      - ./data:/app/data
