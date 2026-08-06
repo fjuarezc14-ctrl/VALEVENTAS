@@ -6,6 +6,8 @@ let activeCategory = 'Todos';
 let selectedDocType = 'Ticket';
 let selectedPaymentMethod = 'Efectivo';
 let currentActiveCustomerForFiado = null;
+let currentUserRole = localStorage.getItem('user-role') || 'Admin';
+let salesDataCache = []; // Caché de ventas para el selector de roles
 
 // ==========================================
 // INICIALIZACIÓN
@@ -87,6 +89,7 @@ async function loadSalesHistory() {
   try {
     const res = await fetch('/api/sales');
     const sales = await res.json();
+    salesDataCache = sales;
     renderSalesHistoryTable(sales);
   } catch (err) {
     console.error('Error cargando historial de ventas:', err);
@@ -592,20 +595,75 @@ async function processAbono() {
 function renderSalesHistoryTable(sales) {
   const tbody = document.getElementById('history-table-body');
   if (sales.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400">No hay ventas registradas aún.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">No hay ventas registradas aún.</td></tr>`;
     return;
   }
 
+  const colSpan = currentUserRole === 'Admin' ? 7 : 6;
+
   tbody.innerHTML = sales.map(s => `
-    <tr class="hover:bg-slate-50">
+    <tr class="hover:bg-slate-50 ${s.status === 'anulada' ? 'bg-slate-100/50 opacity-70' : ''}">
       <td class="p-4 font-bold text-slate-800">${s.receipt_code}</td>
       <td class="p-4 text-slate-500 text-xs">${new Date(s.created_at).toLocaleString()}</td>
       <td class="p-4 text-slate-800 text-xs">${s.customer_name}</td>
       <td class="p-4"><span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[10px] font-bold uppercase">${s.doc_type}</span></td>
       <td class="p-4"><span class="${s.payment_method === 'Fiado' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'} px-2 py-1 rounded text-[10px] font-bold uppercase">${s.payment_method}</span></td>
       <td class="p-4 text-right font-black text-slate-900">S/ ${s.total.toFixed(2)}</td>
+      ${currentUserRole === 'Admin' ? `
+        <td class="p-4 text-center">
+          ${s.status === 'anulada' 
+            ? '<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold">Anulada</span>'
+            : `<button onclick="anularVenta(${s.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-800 font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors">
+                 <i class="fa-solid fa-trash mr-1"></i>Anular
+               </button>`
+          }
+        </td>
+      ` : ''}
     </tr>
   `).join('');
+}
+
+async function anularVenta(saleId) {
+  if (!confirm('¿Está seguro de anular esta venta?\n\nSe devolverá el stock y, si era a FIADO, se reducirá la deuda del cliente.')) return;
+
+  try {
+    const res = await fetch(`/api/sales/${saleId}/anular`, { method: 'PUT' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error anulando venta');
+
+    alert('✅ ' + data.message);
+    await loadSalesHistory();
+    await loadDashboard();
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+// ==========================================
+// 5. CONTROL DE ACCESO (Rol)
+// ==========================================
+function switchRole(role) {
+  currentUserRole = role;
+  localStorage.setItem('user-role', role);
+
+  document.querySelectorAll('.role-btn').forEach(b => {
+    b.classList.remove('bg-blue-600', 'text-white');
+    b.classList.add('bg-slate-700', 'text-slate-300');
+  });
+
+  const btn = document.getElementById('role-' + role);
+  if (btn) {
+    btn.classList.remove('bg-slate-700', 'text-slate-300');
+    btn.classList.add('bg-blue-600', 'text-white');
+  }
+
+  if (role === 'Admin') {
+    document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+  } else {
+    document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+  }
+
+  renderSalesHistoryTable(salesDataCache || []);
 }
 
 // ==========================================

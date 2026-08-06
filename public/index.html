@@ -69,6 +69,19 @@
           </p>
         </div>
       </div>
+
+      <!-- SELECTOR DE ROL -->
+      <div class="mt-3 pt-3 border-t border-slate-800 space-y-1.5">
+        <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Modo Usuario</label>
+        <div class="flex gap-1.5">
+          <button id="role-Admin" onclick="switchRole('Admin')" class="role-btn flex-1 bg-blue-600 text-white font-bold py-2 rounded-xl text-[10px] transition-all">
+            <i class="fa-solid fa-shield-halved"></i> Admin
+          </button>
+          <button id="role-Cajero" onclick="switchRole('Cajero')" class="role-btn flex-1 bg-slate-700 text-slate-300 font-bold py-2 rounded-xl text-[10px] transition-all">
+            <i class="fa-solid fa-cash-register"></i> Cajero
+          </button>
+        </div>
+      </div>
     </div>
   </aside>
 
@@ -285,6 +298,7 @@
                   <th class="p-4">Tipo</th>
                   <th class="p-4">Método</th>
                   <th class="p-4 text-right">Total</th>
+                  <th class="p-4 text-center admin-only hidden">Acciones</th>
                 </tr>
               </thead>
               <tbody id="history-table-body" class="divide-y divide-slate-100 font-medium"></tbody>

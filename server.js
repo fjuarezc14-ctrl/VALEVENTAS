@@ -133,7 +133,7 @@ app.post('/api/customers', (req, res) => {
 // ==========================================
 app.get('/api/sales', (req, res) => {
   const query = `
-    SELECT id, receipt_code, doc_type, customer_name, payment_method, total, created_at
+    SELECT id, receipt_code, doc_type, customer_name, payment_method, total, status, created_at
     FROM sales
     ORDER BY id DESC
     LIMIT 100
@@ -144,6 +144,84 @@ app.get('/api/sales', (req, res) => {
   });
 });
 
+// ANULAR VENTA - El admin puede anular una venta (no elimina, marca como anulada y devuelve stock)
+app.put('/api/sales/:id/anular', (req, res) => {
+  const { id } = req.params;
+
+  db.serialize(() => {
+    db.run("BEGIN TRANSACTION");
+
+    db.get("SELECT id, receipt_code, total, customer_id, payment_method, status FROM sales WHERE id = ?", [id], (err, sale) => {
+      if (err) {
+        db.run("ROLLBACK");
+        return res.status(500).json({ error: err.message });
+      }
+
+      if (!sale) {
+        db.run("ROLLBACK");
+        return res.status(404).json({ error: 'Venta no encontrada.' });
+      }
+
+      if (sale.status === 'anulada') {
+        db.run("ROLLBACK");
+        return res.status(400).json({ error: 'Esta venta ya fue anulada.' });
+      }
+
+      db.all("SELECT product_id, product_name, quantity FROM sale_items WHERE sale_id = ?", [id], (err, items) => {
+        if (err) {
+          db.run("ROLLBACK");
+          return res.status(500).json({ error: err.message });
+        }
+
+        const stockStmt = db.prepare("UPDATE products SET stock = stock + ? WHERE id = ?");
+        items.forEach(item => {
+          if (item.product_id) {
+            stockStmt.run([item.quantity, item.product_id]);
+          }
+        });
+        stockStmt.finalize();
+
+        if (sale.payment_method === 'Fiado' && sale.customer_id) {
+          db.get("SELECT debt FROM customers WHERE id = ?", [sale.customer_id], (err, custRow) => {
+            const currentDebt = custRow ? custRow.debt : 0;
+            const newDebt = Math.max(0, currentDebt - sale.total);
+
+            db.run("UPDATE customers SET debt = ? WHERE id = ?", [newDebt, sale.customer_id]);
+
+            const details = items.map(i => i.quantity + 'x ' + i.product_name).join(', ');
+            db.run(`
+              INSERT INTO fiado_records (customer_id, type, amount, details, balance_after)
+              VALUES (?, 'ANULACION', ?, ?, ?)
+            `, [sale.customer_id, sale.total, 'Anulación venta #' + id + ': ' + details, newDebt]);
+
+            finishAnulation();
+          });
+        } else {
+          finishAnulation();
+        }
+
+        function finishAnulation() {
+          db.run("UPDATE sales SET status = 'anulada' WHERE id = ?", [id], function(err) {
+            if (err) {
+              db.run("ROLLBACK");
+              return res.status(500).json({ error: err.message });
+            }
+
+            db.run("COMMIT");
+            res.json({
+              success: true,
+              message: sale.payment_method === 'Fiado'
+                ? 'Venta anulada y stock restaurado. Deuda reducida en S/ ' + sale.total.toFixed(2)
+                : 'Venta anulada y stock restaurado.',
+              receipt_code: sale.receipt_code
+            });
+          });
+        }
+      });
+    });
+  });
+});
+
 app.post('/api/sales', (req, res) => {
   const { doc_type, customer_id, customer_name, payment_method, items, paid_amount, change_amount } = req.body;
 
@@ -151,6 +229,7 @@ app.post('/api/sales', (req, res) => {
     return res.status(400).json({ error: 'El carrito no puede estar vacío.' });
   }
 
+  // Calcular total
   let total = 0;
   items.forEach(i => {
     total += i.quantity * i.unit_price;
@@ -162,80 +241,130 @@ app.post('/api/sales', (req, res) => {
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
 
-    // Generar correlativo de comprobante
-    const prefijo = doc_type === 'Factura' ? 'F' : (doc_type === 'Boleta' ? 'B' : 'T');
-    db.get("SELECT COUNT(*) as count FROM sales WHERE doc_type = ?", [doc_type], (err, countRow) => {
-      const nextNum = (countRow ? countRow.count : 0) + 1;
-      const receipt_code = `${prefijo}001-${String(nextNum).padStart(6, '0')}`;
-
-      const saleQuery = `
-        INSERT INTO sales (receipt_code, doc_type, customer_id, customer_name, payment_method, subtotal, tax, total, paid_amount, change_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      db.run(saleQuery, [
-        receipt_code,
-        doc_type || 'Ticket',
-        customer_id || null,
-        customer_name || 'Público General',
-        payment_method,
-        subtotal,
-        tax,
-        total,
-        paid_amount || total,
-        change_amount || 0
-      ], function(err) {
+    // VALIDAR STOCK ANTES DE PROCESAR (Punto 3) - Dentro de la transacción
+    const productIds = items.filter(i => i.product_id).map(i => i.product_id);
+    if (productIds.length > 0) {
+      const placeholders = productIds.map(() => '?').join(',');
+      db.all(`SELECT id, name, stock FROM products WHERE id IN (${placeholders})`, productIds, function(err, rows) {
         if (err) {
           db.run("ROLLBACK");
           return res.status(500).json({ error: err.message });
         }
 
-        const saleId = this.lastID;
+        const stockMap = new Map(rows.map(r => [r.id, r]));
 
-        // Insertar items y decrementar stock
-        const itemStmt = db.prepare(`
-          INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `);
-
-        const stockStmt = db.prepare(`
-          UPDATE products SET stock = stock - ? WHERE id = ?
-        `);
-
-        items.forEach(item => {
-          const itemSubtotal = item.quantity * item.unit_price;
-          itemStmt.run([saleId, item.product_id, item.product_name, item.quantity, item.unit_price, itemSubtotal]);
+        for (const item of items) {
           if (item.product_id) {
-            stockStmt.run([item.quantity, item.product_id]);
+            const product = stockMap.get(item.product_id);
+            if (!product) {
+              db.run("ROLLBACK");
+              return res.status(404).json({ error: `Producto no encontrado: ${item.product_name}` });
+            }
+            if (product.stock < item.quantity) {
+              db.run("ROLLBACK");
+              return res.status(400).json({ error: `Stock insuficiente para ${product.name}. Disponible: ${product.stock}, Solicitado: ${item.quantity}` });
+            }
           }
-        });
-
-        itemStmt.finalize();
-        stockStmt.finalize();
-
-        // REGISTRAR FIADO SI CORRESPONDE
-        if (payment_method === 'Fiado' && customer_id) {
-          db.get("SELECT debt FROM customers WHERE id = ?", [customer_id], (err, custRow) => {
-            const currentDebt = custRow ? custRow.debt : 0;
-            const newDebt = currentDebt + total;
-            const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ');
-
-            db.run("UPDATE customers SET debt = ? WHERE id = ?", [newDebt, customer_id]);
-
-            db.run(`
-              INSERT INTO fiado_records (customer_id, type, amount, details, balance_after)
-              VALUES (?, 'COMPRA_FIADA', ?, ?, ?)
-            `, [customer_id, total, details, newDebt]);
-
-            db.run("COMMIT");
-            res.json({ success: true, receipt_code, saleId, total, payment_method });
-          });
-        } else {
-          db.run("COMMIT");
-          res.json({ success: true, receipt_code, saleId, total, payment_method });
         }
+
+        // Stock OK, proceder con la venta
+        continueSale();
       });
-    });
+    } else {
+      continueSale();
+    }
+
+    function continueSale() {
+      // Generar correlativo seguro (Punto 2)
+      const prefijo = doc_type === 'Factura' ? 'F' : (doc_type === 'Boleta' ? 'B' : 'T');
+
+      db.run(`
+        INSERT OR REPLACE INTO counters (doc_type, last_number) 
+        VALUES (?, COALESCE((SELECT last_number + 1 FROM counters WHERE doc_type = ?), 1))
+      `, [doc_type || 'Ticket', doc_type || 'Ticket'], function(err) {
+        if (err) {
+          db.run("ROLLBACK");
+          return res.status(500).json({ error: err.message });
+        }
+
+        db.get("SELECT last_number FROM counters WHERE doc_type = ?", [doc_type || 'Ticket'], function(err, counterRow) {
+          if (err) {
+            db.run("ROLLBACK");
+            return res.status(500).json({ error: err.message });
+          }
+
+          const nextNum = counterRow ? counterRow.last_number : 1;
+          const receipt_code = `${prefijo}001-${String(nextNum).padStart(6, '0')}`;
+
+          const saleQuery = `
+            INSERT INTO sales (receipt_code, doc_type, customer_id, customer_name, payment_method, subtotal, tax, total, paid_amount, change_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          db.run(saleQuery, [
+            receipt_code,
+            doc_type || 'Ticket',
+            customer_id || null,
+            customer_name || 'Público General',
+            payment_method,
+            subtotal,
+            tax,
+            total,
+            paid_amount || total,
+            change_amount || 0
+          ], function(err) {
+            if (err) {
+              db.run("ROLLBACK");
+              return res.status(500).json({ error: err.message });
+            }
+
+            const saleId = this.lastID;
+
+            const itemStmt = db.prepare(`
+              INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `);
+
+            const stockStmt = db.prepare(`
+              UPDATE products SET stock = stock - ? WHERE id = ?
+            `);
+
+            items.forEach(item => {
+              const itemSubtotal = item.quantity * item.unit_price;
+              itemStmt.run([saleId, item.product_id, item.product_name, item.quantity, item.unit_price, itemSubtotal]);
+              if (item.product_id) {
+                stockStmt.run([item.quantity, item.product_id]);
+              }
+            });
+
+            itemStmt.finalize();
+            stockStmt.finalize();
+
+            // REGISTRAR FIADO SI CORRESPONDE
+            if (payment_method === 'Fiado' && customer_id) {
+              db.get("SELECT debt FROM customers WHERE id = ?", [customer_id], (err, custRow) => {
+                const currentDebt = custRow ? custRow.debt : 0;
+                const newDebt = currentDebt + total;
+                const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ');
+
+                db.run("UPDATE customers SET debt = ? WHERE id = ?", [newDebt, customer_id]);
+
+                db.run(`
+                  INSERT INTO fiado_records (customer_id, type, amount, details, balance_after)
+                  VALUES (?, 'COMPRA_FIADA', ?, ?, ?)
+                `, [customer_id, total, details, newDebt]);
+
+                db.run("COMMIT");
+                res.json({ success: true, receipt_code, saleId, total, payment_method });
+              });
+            } else {
+              db.run("COMMIT");
+              res.json({ success: true, receipt_code, saleId, total, payment_method });
+            }
+          });
+        });
+      });
+    }
   });
 });
 

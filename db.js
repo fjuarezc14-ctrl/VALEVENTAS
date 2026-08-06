@@ -61,10 +61,18 @@ db.serialize(() => {
       total REAL NOT NULL,
       paid_amount REAL DEFAULT 0,
       change_amount REAL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'completada', -- completada, anulada, devuelta
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(customer_id) REFERENCES customers(id)
     )
   `);
+
+  // Migración: agregar columna status si la tabla ya existía (bases creadas sin el campo)
+  db.all("PRAGMA table_info(sales)", (err, cols) => {
+    if (!err && cols && !cols.some(c => c.name === 'status')) {
+      db.run("ALTER TABLE sales ADD COLUMN status TEXT NOT NULL DEFAULT 'completada'");
+    }
+  });
 
   // 4. DETALLE DE VENTAS
   db.run(`
@@ -104,6 +112,25 @@ db.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // 7. CONTADORES PARA NÚMEROS DE COMPROBANTES (evita duplicados bajo concurrencia)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS counters (
+      doc_type TEXT PRIMARY KEY,
+      last_number INTEGER NOT NULL DEFAULT 0
+    )
+  `, function(err) {
+    if (!err) {
+      // Seed inicial de contadores si está vacío
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO counters (doc_type, last_number) VALUES (?, ?)
+      `);
+      stmt.run('Ticket', 0);
+      stmt.run('Boleta', 0);
+      stmt.run('Factura', 0);
+      stmt.finalize();
+    }
+  });
 
   // SEED DE DATOS INICIALES SI LA TABLA DE PRODUCTOS ESTÁ VACÍA
   db.get("SELECT COUNT(*) AS count FROM products", (err, row) => {
