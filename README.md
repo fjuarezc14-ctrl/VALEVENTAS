@@ -1,29 +1,45 @@
-# VALEVENTAS by VALETEC - Sistema POS & Fiados (Instalación Local)
+# VALEVENTAS by VT VALETEC - Sistema POS & Fiados (Docker Local)
 
-Sistema de Punto de Venta (POS), Gestión de Inventario, CRM de Clientes, Cuentas por Cobrar (Módulo Fiados) e Historial de Ventas empaquetado para instalación local rápida en computadoras de tienda usando **Docker Desktop**.
+Sistema de Punto de Venta (POS), Gestión de Inventario, CRM de Clientes, Cuentas por Cobrar (Módulo Fiados) e Historial de Ventas optimizado para ejecución local en contenedores Docker mediante **Docker Compose**.
 
 ---
 
-## 🚀 Instalación en la Computadora de la Tienda
+## 🏛️ Estándares Técnicos y Gobernanza
 
-1. Asegúrate de tener **Docker Desktop** instalado y abierto en la PC.
-2. Abre la terminal o consola de comandos en la carpeta del proyecto.
-3. Ejecuta el siguiente comando para iniciar el sistema:
+Este repositorio cumple estrictamente con los lineamientos especificados en la [Constitución de Desarrollo VT VALETEC](constitution.md):
+- **Código y Nombres de Archivo:** Estándar internacional en inglés.
+- **Documentación y Comentarios:** Redactados en español.
+- **Seguridad:** Uso obligatorio de variables de entorno (`.env`) sin datos confidenciales incrustados.
 
-```bash
-docker-compose up -d --build
-```
+---
 
-4. ¡Listo! Abre cualquier navegador web e ingresa a:
-   **http://localhost:8090**
+## 🚀 Instalación y Pruebas Locales
+
+1. Asegúrate de tener **Docker Desktop** activo en la computadora.
+2. Abre la terminal en la raíz del proyecto.
+3. Copia el archivo de variables de entorno (si no existe):
+   ```bash
+   cp .env.example .env
+   ```
+4. Inicia la arquitectura de contenedores con el siguiente comando:
+   ```bash
+   docker compose up -d --build
+   ```
+5. Acceso a las aplicaciones:
+   - **Frontend (Interfaz POS & Gestión):** [http://localhost:3000](http://localhost:3000)
+   - **Backend (API Dashboard & Endpoints):** [http://localhost:8090/api/dashboard](http://localhost:8090/api/dashboard)
+
+---
+
+## 🛠️ Servicios y Puertos Configurados
+
+| Servicio | Contenedor | Puerto Host | Puerto Interno | Descripción |
+| :--- | :--- | :---: | :---: | :--- |
+| **Frontend** | `valeventas-frontend` | `3000` | `80` | Servidor Web Nginx sirviendo la SPA estática e integrando reverse proxy para la API. |
+| **Backend** | `valeventas-backend` | `8090` | `8090` | Servidor API Node.js / Express con base de datos SQLite. |
 
 ---
 
 ## 🔒 Persistencia de Datos
-Toda la información (ventas, productos, clientes y deudas) se almacena en la base de datos local SQLite dentro de la carpeta `./data/valeventas.db`. Aunque el contenedor Docker se reinicie o apague la computadora, los datos permanecerán seguros.
 
----
-
-## 🛠️ Puertos Utilizados
-- **Puerto Host:** `8090` (Configurado para no tener conflicto con ningún otro proyecto Docker existente).
-- **Contenedor:** `valeventas-app`.
+Toda la información (ventas, productos, clientes y deudas) se almacena localmente en la base de datos SQLite en el volumen montado `./data/valeventas.db`. Los datos se mantienen seguros incluso si los contenedores se detienen o se reinicia la máquina.

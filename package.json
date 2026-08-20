@@ -1,15 +1,41 @@
 {
   "name": "valeventas",
   "version": "1.0.0",
-  "description": "Sistema POS & Fiados para Bodega - VALEVENTAS by VALETEC",
-  "main": "server.js",
+  "description": "Sistema POS & Fiados para Bodega - VALEVENTAS by VT VALETEC",
+  "main": "main.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "electron": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.valetec.valeventas",
+    "productName": "VALEVENTAS POS",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "db.js",
+      "public/**/*",
+      "package.json"
+    ]
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "sqlite3": "^5.1.7"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
   }
 }

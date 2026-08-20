@@ -1,5 +1,9 @@
 node_modules/
+postgres-data/
+.env
 data/*.db
 data/*.db-journal
 .DS_Store
 *.log
+dist/
+build/

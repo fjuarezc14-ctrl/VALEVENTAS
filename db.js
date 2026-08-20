@@ -1,193 +1,193 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
+// ==========================================
+// Módulo de Conexión a Base de Datos PostgreSQL
+// VT VALETEC Standard Database Layer
+// ==========================================
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 
-// Asegurar que exista el directorio data para la persistencia de SQLite
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432'),
+  user: process.env.POSTGRES_USER || 'valetec',
+  password: process.env.POSTGRES_PASSWORD || 'valetec_secure_pass',
+  database: process.env.POSTGRES_DB || 'valeventas_db'
+});
+
+// Probar conexión e inicializar esquemas de tablas
+async function initDb() {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Base de Datos PostgreSQL conectada exitosamente.');
+    client.release();
+
+    // 1. PRODUCTOS
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(100) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100) NOT NULL DEFAULT 'Abarrotes',
+        purchase_price NUMERIC(10,2) DEFAULT 0,
+        price NUMERIC(10,2) NOT NULL,
+        stock INT NOT NULL DEFAULT 0,
+        min_stock INT DEFAULT 5,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
+    `);
+
+    // 2. CLIENTES
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        doc VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50) DEFAULT '',
+        address VARCHAR(255) DEFAULT '',
+        debt NUMERIC(10,2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 6. USUARIOS Y CONTROL DE ACCESO (DECLARADO ANTES DE SALES POR FK)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'Cajero',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 7. ARQUEO Y CIERRE DE CAJA DIARIO (TURNO Z)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cash_registers (
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255) NOT NULL,
+        opening_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+        cash_sales NUMERIC(10,2) DEFAULT 0,
+        card_sales NUMERIC(10,2) DEFAULT 0,
+        transfer_sales NUMERIC(10,2) DEFAULT 0,
+        fiado_sales NUMERIC(10,2) DEFAULT 0,
+        expected_cash NUMERIC(10,2) DEFAULT 0,
+        actual_cash NUMERIC(10,2) DEFAULT 0,
+        difference NUMERIC(10,2) DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'abierta',
+        notes VARCHAR(255) DEFAULT '',
+        opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        closed_at TIMESTAMPTZ
+      );
+    `);
+
+    // 3. VENTAS (CON AUDITORÍA DE VENDEDOR Y VÍNCULO A TURNO DE CAJA)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sales (
+        id SERIAL PRIMARY KEY,
+        receipt_code VARCHAR(100) UNIQUE NOT NULL,
+        doc_type VARCHAR(50) NOT NULL,
+        customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
+        customer_name VARCHAR(255) DEFAULT 'Público General',
+        payment_method VARCHAR(50) NOT NULL,
+        subtotal NUMERIC(10,2) NOT NULL,
+        tax NUMERIC(10,2) NOT NULL,
+        total NUMERIC(10,2) NOT NULL,
+        paid_amount NUMERIC(10,2) DEFAULT 0,
+        change_amount NUMERIC(10,2) DEFAULT 0,
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255) DEFAULT 'Administrador Principal',
+        cash_register_id INT REFERENCES cash_registers(id) ON DELETE SET NULL,
+        status VARCHAR(20) DEFAULT 'completada',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS user_id INT REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS user_name VARCHAR(255) DEFAULT 'Administrador Principal';
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS cash_register_id INT REFERENCES cash_registers(id) ON DELETE SET NULL;
+    `);
+
+    // 4. DETALLE DE VENTAS
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id SERIAL PRIMARY KEY,
+        sale_id INT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        product_id INT REFERENCES products(id) ON DELETE SET NULL,
+        product_name VARCHAR(255) NOT NULL,
+        quantity INT NOT NULL,
+        unit_price NUMERIC(10,2) NOT NULL,
+        total_price NUMERIC(10,2) NOT NULL
+      );
+    `);
+
+    // 5. HISTORIAL DE FIADOS Y ABONOS
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fiado_payments (
+        id SERIAL PRIMARY KEY,
+        customer_id INT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        type VARCHAR(20) NOT NULL,
+        amount NUMERIC(10,2) NOT NULL,
+        balance_after NUMERIC(10,2) NOT NULL,
+        details VARCHAR(255) DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await seedInitialData();
+
+  } catch (err) {
+    console.error('❌ Error conectando o inicializando PostgreSQL:', err.message);
+  }
 }
 
-const dbPath = path.join(dataDir, 'valeventas.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('❌ Error conectando a SQLite:', err.message);
-  } else {
-    console.log('✅ Base de Datos SQLite conectada en:', dbPath);
+async function seedInitialData() {
+  try {
+    const adminPassHash = bcrypt.hashSync('admin123', 10);
+    const cajeroPassHash = bcrypt.hashSync('cajero123', 10);
+
+    const resProd = await pool.query('SELECT COUNT(*) FROM products');
+    if (parseInt(resProd.rows[0].count) === 0) {
+      console.log('🌱 Sembrando datos iniciales de productos...');
+      await pool.query(`
+        INSERT INTO products (code, name, category, purchase_price, price, stock, min_stock) VALUES
+        ('7750123001', 'Arroz Superior Costeño 1kg', 'Abarrotes', 3.80, 4.50, 50, 10),
+        ('7750123002', 'Aceite Primor Clásico 1L', 'Abarrotes', 7.50, 9.20, 30, 8),
+        ('7750123003', 'Leche Gloria Entera 390g', 'Lácteos', 3.20, 4.00, 100, 15),
+        ('7750123004', 'Detergente Opal ULTRA 800g', 'Limpieza', 5.50, 7.00, 4, 10),
+        ('7750123005', 'Gaseosa Coca Cola 1.5L', 'Bebidas', 5.00, 6.50, 3, 5);
+      `);
+    }
+
+    const resCust = await pool.query('SELECT COUNT(*) FROM customers');
+    if (parseInt(resCust.rows[0].count) === 0) {
+      console.log('🌱 Sembrando datos iniciales de clientes...');
+      await pool.query(`
+        INSERT INTO customers (doc, name, phone, address, debt) VALUES
+        ('45892301', 'Juan Pérez', '987654321', 'Av. Central 123', 0),
+        ('10458923011', 'Comercial Don José S.A.C.', '912345678', 'Jr. Comercio 456', 57.50);
+      `);
+    }
+
+    const resUsers = await pool.query('SELECT COUNT(*) FROM users');
+    if (parseInt(resUsers.rows[0].count) === 0) {
+      console.log('🌱 Sembrando usuarios con contraseñas hacheadas bcrypt...');
+      await pool.query(`
+        INSERT INTO users (username, password, name, role) VALUES
+        ('admin', $1, 'Administrador Principal', 'Admin'),
+        ('cajero', $2, 'Cajero Turno Mañana', 'Cajero');
+      `, [adminPassHash, cajeroPassHash]);
+    } else {
+      await pool.query('UPDATE users SET password = $1 WHERE username = $2', [adminPassHash, 'admin']);
+      await pool.query('UPDATE users SET password = $1 WHERE username = $2', [cajeroPassHash, 'cajero']);
+    }
+  } catch (err) {
+    console.error('❌ Error sembrando datos iniciales:', err.message);
   }
-});
+}
 
-// Inicializar Tablas
-db.serialize(() => {
-  // 1. PRODUCTOS
-  db.run(`
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'Abarrotes',
-      purchase_price REAL DEFAULT 0,
-      price REAL NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      min_stock INTEGER DEFAULT 5,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+initDb();
 
-  // 2. CLIENTES
-  db.run(`
-    CREATE TABLE IF NOT EXISTS customers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      phone TEXT DEFAULT '',
-      address TEXT DEFAULT '',
-      debt REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // 3. VENTAS
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sales (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      receipt_code TEXT UNIQUE NOT NULL,
-      doc_type TEXT NOT NULL, -- Ticket, Boleta, Factura
-      customer_id INTEGER,
-      customer_name TEXT DEFAULT 'Público General',
-      payment_method TEXT NOT NULL, -- Efectivo, Tarjeta, Yape/Plin, Mixto, Fiado
-      subtotal REAL NOT NULL,
-      tax REAL NOT NULL,
-      total REAL NOT NULL,
-      paid_amount REAL DEFAULT 0,
-      change_amount REAL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'completada', -- completada, anulada, devuelta
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(customer_id) REFERENCES customers(id)
-    )
-  `);
-
-  // Migración: agregar columna status si la tabla ya existía (bases creadas sin el campo)
-  db.all("PRAGMA table_info(sales)", (err, cols) => {
-    if (!err && cols && !cols.some(c => c.name === 'status')) {
-      db.run("ALTER TABLE sales ADD COLUMN status TEXT NOT NULL DEFAULT 'completada'");
-    }
-  });
-
-  // 4. DETALLE DE VENTAS
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sale_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sale_id INTEGER NOT NULL,
-      product_id INTEGER,
-      product_name TEXT NOT NULL,
-      quantity INTEGER NOT NULL,
-      unit_price REAL NOT NULL,
-      subtotal REAL NOT NULL,
-      FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE
-    )
-  `);
-
-  // 5. REGISTROS FIADOS Y ABONOS
-  db.run(`
-    CREATE TABLE IF NOT EXISTS fiado_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_id INTEGER NOT NULL,
-      type TEXT NOT NULL, -- COMPRA_FIADA | ABONO
-      amount REAL NOT NULL,
-      details TEXT DEFAULT '',
-      balance_after REAL NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(customer_id) REFERENCES customers(id)
-    )
-  `);
-
-  // 6. USUARIOS Y PERMISOS
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'Vendedor', -- Administrador, Cajero, Vendedor
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // 7. CONTADORES PARA NÚMEROS DE COMPROBANTES (evita duplicados bajo concurrencia)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS counters (
-      doc_type TEXT PRIMARY KEY,
-      last_number INTEGER NOT NULL DEFAULT 0
-    )
-  `, function(err) {
-    if (!err) {
-      // Seed inicial de contadores si está vacío
-      const stmt = db.prepare(`
-        INSERT OR IGNORE INTO counters (doc_type, last_number) VALUES (?, ?)
-      `);
-      stmt.run('Ticket', 0);
-      stmt.run('Boleta', 0);
-      stmt.run('Factura', 0);
-      stmt.finalize();
-    }
-  });
-
-  // SEED DE DATOS INICIALES SI LA TABLA DE PRODUCTOS ESTÁ VACÍA
-  db.get("SELECT COUNT(*) AS count FROM products", (err, row) => {
-    if (!err && row.count === 0) {
-      console.log('🌱 Poblando datos iniciales de prueba para la bodega...');
-
-      const stmtProduct = db.prepare(`
-        INSERT INTO products (code, name, category, purchase_price, price, stock)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-
-      const initialProducts = [
-        ['75010001', 'Inka Kola 3L Desechable', 'Bebidas', 9.50, 12.50, 24],
-        ['75010002', 'Coca Cola 3L Desechable', 'Bebidas', 9.50, 12.50, 18],
-        ['75010003', 'Arroz Costeño 1kg', 'Abarrotes', 4.10, 4.90, 50],
-        ['75010004', 'Azúcar Rubia Casa Grande 1kg', 'Abarrotes', 3.80, 4.50, 40],
-        ['75010005', 'Aceite Primor 1L', 'Abarrotes', 8.20, 10.50, 15],
-        ['75010006', 'Leche Gloria Azul 400g', 'Lácteos', 3.60, 4.30, 36],
-        ['75010007', 'Pan de Molde Bimbo Blanco 480g', 'Panadería', 6.00, 7.80, 8],
-        ['75010008', 'Detergente Opal 800g', 'Limpieza', 6.50, 8.20, 12],
-        ['75010009', 'Jabón Bolívar Blanco', 'Limpieza', 2.80, 3.50, 25],
-        ['75010010', 'Galletas Casino Menta 6pk', 'Snacks', 2.50, 3.20, 30]
-      ];
-
-      initialProducts.forEach(p => stmtProduct.run(p));
-      stmtProduct.finalize();
-
-      // Seed Clientes
-      const stmtCustomer = db.prepare(`
-        INSERT INTO customers (doc, name, phone, debt)
-        VALUES (?, ?, ?, ?)
-      `);
-
-      const initialCustomers = [
-        ['45891234', 'María Mendoza', '987654321', 45.00],
-        ['10234567891', 'Bodega San Martín RUC', '912345678', 0.00],
-        ['41239876', 'Jorge Ramírez', '955443322', 12.50]
-      ];
-
-      initialCustomers.forEach(c => stmtCustomer.run(c));
-      stmtCustomer.finalize();
-
-      // Seed Historial de Fiados inicial para María Mendoza (ID 1)
-      db.run(`
-        INSERT INTO fiado_records (customer_id, type, amount, details, balance_after)
-        VALUES (1, 'COMPRA_FIADA', 45.00, '2x Inka Kola 3L, 1x Aceite Primor', 45.00)
-      `);
-
-      // Seed Usuarios
-      db.run(`
-        INSERT INTO users (username, name, role)
-        VALUES ('admin', 'Carlos Admin', 'Administrador'), ('cajero1', 'Ana Cajera', 'Cajero')
-      `);
-
-      console.log('✅ Base de datos poblada con éxito.');
-    }
-  });
-});
-
-module.exports = db;
+module.exports = {
+  query: (text, params) => pool.query(text, params),
+  pool
+};

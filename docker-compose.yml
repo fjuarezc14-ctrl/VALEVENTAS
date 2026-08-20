@@ -1,16 +1,57 @@
-version: '3.8'
+# ==========================================
+# Docker Compose para VALEVENTAS by VT VALETEC
+# Orquestación: PostgreSQL 16 + Backend Node.js + Frontend Nginx
+# ==========================================
 
 services:
-  valeventas-web:
+  # Base de Datos Relacional PostgreSQL 16
+  valeventas-db:
+    image: postgres:16-alpine
+    container_name: valeventas-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-valetec}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-valetec_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-valeventas_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-valetec} -d ${POSTGRES_DB:-valeventas_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Servicio de Backend (API Node.js + Express)
+  valeventas-backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: valeventas-app
+    container_name: valeventas-backend
     restart: always
     ports:
-      - "8090:8090"
+      - "${BACKEND_PORT:-8090}:8090"
     environment:
       - PORT=8090
-      - NODE_ENV=production
-    volumes:
-      - ./data:/app/data
+      - NODE_ENV=${NODE_ENV:-production}
+      - POSTGRES_HOST=valeventas-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-valetec}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-valetec_secure_pass}
+      - POSTGRES_DB=${POSTGRES_DB:-valeventas_db}
+    depends_on:
+      valeventas-db:
+        condition: service_healthy
+
+  # Servicio de Frontend (Servidor Web Nginx)
+  valeventas-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: valeventas-frontend
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - valeventas-backend

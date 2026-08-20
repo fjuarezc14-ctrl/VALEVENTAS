@@ -1,0 +1,17 @@
+# ==========================================
+# Dockerfile para Frontend (VALEVENTAS Web)
+# VT VALETEC Standard Nginx Container
+# ==========================================
+FROM nginx:alpine
+
+# Copiar archivo de configuracion personalizado de Nginx
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copiar archivos estaticos del frontend (HTML, CSS, JS)
+COPY public/ /usr/share/nginx/html/
+
+# Exponer puerto 80 del servidor Nginx
+EXPOSE 80
+
+# Comando de inicio de Nginx
+CMD ["nginx", "-g", "daemon off;"]
