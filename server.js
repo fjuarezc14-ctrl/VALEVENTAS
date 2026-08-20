@@ -1,5 +1,5 @@
 // ==========================================
-// Servidor Backend API VALEVENTAS (Express + WebSockets Socket.io + PostgreSQL + JWT Auth + RBAC)
+// Servidor Backend API VALEVENTAS (Express + WebSockets Socket.io + PostgreSQL + Rate Limiter Anti-Fuerza Bruta)
 // VT VALETEC Standard Enterprise Server
 // ==========================================
 const express = require('express');
@@ -9,6 +9,7 @@ const cors = require('cors');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const db = require('./db');
 
 const app = express();
@@ -22,6 +23,15 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 8090;
 const JWT_SECRET = process.env.JWT_SECRET || 'valetec_jwt_super_secret_key_2026';
+
+// Configuración de Rate Limiting para Login (Protección Anti-Fuerza Bruta)
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000, // Ventana de 1 minuto
+  max: 5, // Máximo 5 intentos por IP dentro del minuto
+  message: { error: '⚠️ Demasiados intentos fallidos de inicio de sesión. Por seguridad, espere 1 minuto antes de reintentar.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 app.use(cors());
 app.use(express.json());
@@ -63,9 +73,9 @@ function adminOnly(req, res, next) {
 }
 
 // ==========================================
-// 0. AUTENTICACIÓN (LOGIN & VERIFICACIÓN)
+// 0. AUTENTICACIÓN (LOGIN CON PROTECCIÓN ANTI-FUERZA BRUTA & VERIFICACIÓN)
 // ==========================================
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos.' });
@@ -794,5 +804,5 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor VALEVENTAS (WebSockets Socket.io + PostgreSQL Enterprise + JWT Auth) activo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor VALEVENTAS (Anti-Fuerza Bruta + WebSockets Socket.io + PostgreSQL Enterprise) activo en http://localhost:${PORT}`);
 });
