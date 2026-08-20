@@ -1,6 +1,6 @@
 // ==========================================
 // Cliente Frontend VALEVENTAS POS
-// VT VALETEC Standard Application Logic + WebSockets Real-Time Sync
+// VT VALETEC Standard Application Logic + WebSockets Real-Time Sync & RBAC Audit
 // ==========================================
 
 // Estado local de la aplicación
@@ -48,6 +48,8 @@ async function init() {
       }
     } catch (err) {
       console.error('Error autenticando token:', err);
+      logout();
+      return;
     }
   } else {
     openLoginModal();
@@ -104,10 +106,18 @@ function updateUserUI() {
 
     const isAdmin = currentUser.role === 'Admin';
 
+    // Aplicar ocultamiento estricto a todos los elementos con clase admin-only
     document.querySelectorAll('.admin-only').forEach(el => {
-      if (isAdmin) el.classList.remove('hidden');
-      else el.classList.add('hidden');
+      if (isAdmin) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
     });
+
+    // Re-renderizar tablas para asegurar que las filas dinámicas respeten el rol
+    renderInventoryTable();
+    renderSalesHistoryTable(currentReportSales);
 
     document.getElementById('modal-login').classList.add('hidden');
   } else {
@@ -142,6 +152,7 @@ async function handleLogin(e) {
     await loadProducts();
     await loadSalesHistory();
     await loadCurrentCashRegister();
+    await loadUsers();
     focusSearchInput();
 
   } catch (err) {
@@ -167,6 +178,13 @@ function focusSearchInput() {
 }
 
 function switchTab(tabId) {
+  // Validación de seguridad para navegación por tabs
+  if (tabId === 'users' && (!currentUser || currentUser.role !== 'Admin')) {
+    alert('⚠️ Acceso denegado. Solo los usuarios con rol Administrador pueden ingresar al Control de Acceso.');
+    switchTab('pos');
+    return;
+  }
+
   document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
   
   const targetView = document.getElementById('view-' + tabId);
@@ -553,6 +571,8 @@ function exportSalesToCSV() {
 }
 
 async function loadUsers() {
+  if (!currentUser || currentUser.role !== 'Admin') return;
+
   try {
     const res = await fetch('/api/users', { headers: getAuthHeaders() });
     if (res.ok) {
@@ -940,6 +960,7 @@ function setInventoryFilter(filter) {
 function renderInventoryTable() {
   const query = (document.getElementById('inventory-search')?.value || '').toLowerCase().trim();
   const tbody = document.getElementById('inventory-table-body');
+  const isAdmin = currentUser && currentUser.role === 'Admin';
   
   const filtered = PRODUCTS.filter(p => {
     const matchQuery = p.name.toLowerCase().includes(query) || p.code.toLowerCase().includes(query);
@@ -961,15 +982,21 @@ function renderInventoryTable() {
         <td class="p-4 text-slate-500">S/ ${(p.purchase_price || 0).toFixed(2)}</td>
         <td class="p-4 font-bold text-slate-900">S/ ${p.price.toFixed(2)}</td>
         <td class="p-4"><span class="${isLow ? 'text-rose-600 bg-rose-100 border border-rose-200' : 'text-emerald-600 bg-emerald-100'} px-2.5 py-1 rounded font-bold text-xs">${p.stock} und.</span></td>
-        <td class="p-4 text-center space-x-2 admin-only">
-          <button onclick="deleteProduct(${p.id})" class="text-rose-400 hover:text-rose-600 font-bold text-xs"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button>
-        </td>
+        ${isAdmin ? `
+          <td class="p-4 text-center space-x-2">
+            <button onclick="deleteProduct(${p.id})" class="text-rose-400 hover:text-rose-600 font-bold text-xs"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button>
+          </td>
+        ` : ''}
       </tr>
     `;
   }).join('');
 }
 
 function openProductModal() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede registrar o modificar productos.');
+    return;
+  }
   document.getElementById('form-product').reset();
   document.getElementById('modal-product').classList.remove('hidden');
 }
@@ -981,6 +1008,11 @@ function closeProductModal() {
 
 async function saveProduct(e) {
   e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
+
   const payload = {
     code: document.getElementById('prod-code').value.trim(),
     name: document.getElementById('prod-name').value.trim(),
@@ -1014,7 +1046,12 @@ async function saveProduct(e) {
 }
 
 async function deleteProduct(id) {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede eliminar productos.');
+    return;
+  }
   if (!confirm('¿Está seguro de eliminar este producto del inventario?')) return;
+
   try {
     const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Error eliminando producto');
@@ -1177,6 +1214,8 @@ async function processAbono() {
 // ==========================================
 function renderSalesHistoryTable(sales) {
   const tbody = document.getElementById('history-table-body');
+  if (!tbody) return;
+
   if (sales.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-slate-400">No hay ventas registradas en el período seleccionado.</td></tr>`;
     return;
@@ -1193,9 +1232,9 @@ function renderSalesHistoryTable(sales) {
       <td class="p-4"><span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[10px] font-bold uppercase">${s.doc_type}</span></td>
       <td class="p-4"><span class="${s.payment_method === 'Fiado' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'} px-2 py-1 rounded text-[10px] font-bold uppercase">${s.payment_method}</span></td>
       <td class="p-4 text-right font-black text-slate-900">S/ ${s.total.toFixed(2)}</td>
-      <td class="p-4 text-right font-bold text-emerald-600 admin-only">${isAdmin ? 'S/ ' + (s.profit || 0).toFixed(2) : '🔒 Restringido'}</td>
+      ${isAdmin ? `<td class="p-4 text-right font-bold text-emerald-600">S/ ${(s.profit || 0).toFixed(2)}</td>` : ''}
       ${isAdmin ? `
-        <td class="p-4 text-center admin-only">
+        <td class="p-4 text-center">
           ${s.status === 'anulada' 
             ? '<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold">Anulada</span>'
             : `<button onclick="anularVenta(${s.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-800 font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors">
@@ -1209,6 +1248,10 @@ function renderSalesHistoryTable(sales) {
 }
 
 async function anularVenta(saleId) {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede anular ventas.');
+    return;
+  }
   if (!confirm('¿Está seguro de anular esta venta?\n\nSe devolverá el stock y, si era a FIADO, se reducirá la deuda del cliente.')) return;
 
   try {
@@ -1222,7 +1265,7 @@ async function anularVenta(saleId) {
     await loadDashboard();
   } catch (err) {
     playBeep('error');
-    alert('❌ Error: ' + err.message);
+    alert('❌ ' + err.message);
   }
 }
 
@@ -1231,6 +1274,8 @@ async function anularVenta(saleId) {
 // ==========================================
 function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-body');
+  if (!tbody) return;
+
   tbody.innerHTML = users.map(u => `
     <tr class="hover:bg-slate-50">
       <td class="p-4 font-mono font-bold text-slate-800">${u.username}</td>
@@ -1247,6 +1292,10 @@ function renderUsersTable(users) {
 }
 
 function openUserModal() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede gestionar usuarios.');
+    return;
+  }
   document.getElementById('form-user').reset();
   document.getElementById('modal-user').classList.remove('hidden');
 }
@@ -1257,6 +1306,11 @@ function closeUserModal() {
 
 async function saveUser(e) {
   e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
+
   const payload = {
     username: document.getElementById('user-username').value.trim(),
     password: document.getElementById('user-password').value.trim(),
@@ -1284,6 +1338,10 @@ async function saveUser(e) {
 }
 
 function openPasswordModal(userId, username) {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
   currentPasswordUserId = userId;
   document.getElementById('password-user-title').innerText = `Cambiar Contraseña para: ${username}`;
   document.getElementById('input-new-password').value = '';
@@ -1296,6 +1354,10 @@ function closePasswordModal() {
 
 async function processChangePassword(e) {
   e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
   if (!currentPasswordUserId) return;
 
   const newPassword = document.getElementById('input-new-password').value.trim();
