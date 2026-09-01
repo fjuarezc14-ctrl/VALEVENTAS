@@ -119,14 +119,21 @@ function updateUserUI() {
     renderInventoryTable();
     renderSalesHistoryTable(currentReportSales);
 
-    document.getElementById('modal-login').classList.add('hidden');
+    const loginModal = document.getElementById('modal-login');
+    loginModal.classList.add('opacity-0');
+    setTimeout(() => {
+      loginModal.classList.add('hidden');
+      loginModal.classList.remove('opacity-0');
+    }, 200);
+
   } else {
     openLoginModal();
   }
 }
 
 function openLoginModal() {
-  document.getElementById('modal-login').classList.remove('hidden');
+  const loginModal = document.getElementById('modal-login');
+  loginModal.classList.remove('hidden');
 }
 
 async function handleLogin(e) {
@@ -164,7 +171,7 @@ async function handleLogin(e) {
 function logout() {
   localStorage.removeItem('valetec-token');
   currentUser = null;
-  document.getElementById('modal-login').classList.remove('hidden');
+  openLoginModal();
 }
 
 function focusSearchInput() {
@@ -274,6 +281,7 @@ function setupKeyboardShortcuts() {
       closeCloseRegisterModal();
       closeUserModal();
       closePasswordModal();
+      closeEditSaleModal();
       focusSearchInput();
       return;
     }
@@ -295,15 +303,26 @@ async function loadCurrentCashRegister() {
 
     const banner = document.getElementById('cash-register-banner');
     if (currentCashRegister) {
-      const totalRecorded = currentCashRegister.opening_amount + currentCashRegister.cash_sales;
+      const initial = parseFloat(currentCashRegister.opening_amount) || 0;
+      const cashSales = parseFloat(currentCashRegister.cash_sales) || 0;
+      const abonos = parseFloat(currentCashRegister.fiado_abonos) || 0;
+      const retiros = parseFloat(currentCashRegister.total_withdrawals) || 0;
+      const totalExpected = currentCashRegister.expected_cash !== undefined ? currentCashRegister.expected_cash : (initial + cashSales + abonos - retiros);
+      const isAdmin = currentUser && currentUser.role === 'Admin';
+
       banner.innerHTML = `
-        <div class="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl flex items-center justify-between text-xs font-bold text-emerald-900">
+        <div class="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl flex items-center justify-between text-xs font-bold text-emerald-900 flex-wrap gap-2">
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Caja Abierta por ${currentCashRegister.user_name} (Fondo: S/ ${currentCashRegister.opening_amount.toFixed(2)})</span>
+            <span>Caja Abierta por ${currentCashRegister.user_name} (Fondo: S/ ${initial.toFixed(2)})</span>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="text-slate-600">Efectivo en Caja: S/ ${totalRecorded.toFixed(2)}</span>
+          <div class="flex items-center gap-3">
+            <span class="text-slate-600">Efectivo en Caja: <strong class="text-emerald-700 text-sm">S/ ${totalExpected.toFixed(2)}</strong></span>
+            ${isAdmin ? `
+              <button onclick="openWithdrawalModal()" class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1">
+                <i class="fa-solid fa-money-bill-transfer"></i> Retiro de Efectivo
+              </button>
+            ` : ''}
             <button onclick="openCloseCashRegisterModal()" class="bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm">
               <i class="fa-solid fa-lock mr-1"></i>Cierre Z de Caja
             </button>
@@ -359,18 +378,93 @@ async function processOpenCashRegister(e) {
   }
 }
 
+function openWithdrawalModal() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede realizar retiros de efectivo.');
+    return;
+  }
+  if (!currentCashRegister) {
+    alert('⚠️ Debe haber una caja abierta para registrar un retiro.');
+    return;
+  }
+  document.getElementById('form-withdrawal').reset();
+  document.getElementById('modal-withdrawal').classList.remove('hidden');
+}
+
+function closeWithdrawalModal() {
+  document.getElementById('modal-withdrawal').classList.add('hidden');
+}
+
+async function saveWithdrawal(e) {
+  e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede realizar retiros de efectivo.');
+    return;
+  }
+
+  const amount = parseFloat(document.getElementById('withdrawal-amount').value);
+  const reason = document.getElementById('withdrawal-reason').value.trim();
+
+  try {
+    const res = await fetch('/api/cash-register/movement', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ amount, reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al registrar el retiro');
+
+    closeWithdrawalModal();
+    playBeep('success');
+    alert('✅ ' + data.message);
+    await loadCurrentCashRegister();
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
+}
+
 async function openCloseCashRegisterModal() {
   if (!currentCashRegister) return;
 
-  const expectedCash = currentCashRegister.opening_amount + currentCashRegister.cash_sales;
-  document.getElementById('close-opening-amount').innerText = `S/ ${currentCashRegister.opening_amount.toFixed(2)}`;
-  document.getElementById('close-cash-sales').innerText = `S/ ${currentCashRegister.cash_sales.toFixed(2)}`;
-  document.getElementById('close-card-sales').innerText = `S/ ${currentCashRegister.card_sales.toFixed(2)}`;
-  document.getElementById('close-transfer-sales').innerText = `S/ ${currentCashRegister.transfer_sales.toFixed(2)}`;
-  document.getElementById('close-fiado-sales').innerText = `S/ ${currentCashRegister.fiado_sales.toFixed(2)}`;
+  const initial = parseFloat(currentCashRegister.opening_amount) || 0;
+  const cashSales = parseFloat(currentCashRegister.cash_sales) || 0;
+  const abonos = parseFloat(currentCashRegister.fiado_abonos) || 0;
+  const retiros = parseFloat(currentCashRegister.total_withdrawals) || 0;
+  const expectedCash = currentCashRegister.expected_cash !== undefined ? currentCashRegister.expected_cash : (initial + cashSales + abonos - retiros);
+
+  document.getElementById('close-opening-amount').innerText = `S/ ${initial.toFixed(2)}`;
+  document.getElementById('close-cash-sales').innerText = `S/ ${cashSales.toFixed(2)}`;
+  if (document.getElementById('close-fiado-abonos')) document.getElementById('close-fiado-abonos').innerText = `S/ ${abonos.toFixed(2)}`;
+  if (document.getElementById('close-withdrawals')) document.getElementById('close-withdrawals').innerText = `S/ ${retiros.toFixed(2)}`;
+  document.getElementById('close-card-sales').innerText = `S/ ${(parseFloat(currentCashRegister.card_sales) || 0).toFixed(2)}`;
+  document.getElementById('close-transfer-sales').innerText = `S/ ${(parseFloat(currentCashRegister.transfer_sales) || 0).toFixed(2)}`;
+  document.getElementById('close-fiado-sales').innerText = `S/ ${(parseFloat(currentCashRegister.fiado_sales) || 0).toFixed(2)}`;
   document.getElementById('close-expected-cash').innerText = `S/ ${expectedCash.toFixed(2)}`;
   document.getElementById('input-actual-cash').value = expectedCash.toFixed(2);
   calculateCashDifference();
+
+  // Renderizar abonos del turno activo para el cajero
+  const abonosList = currentCashRegister.shift_abonos || [];
+  const abonosTotal = abonosList.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+  if (document.getElementById('close-shift-abonos-total')) {
+    document.getElementById('close-shift-abonos-total').innerText = `S/ ${abonosTotal.toFixed(2)}`;
+  }
+  const listEl = document.getElementById('close-shift-abonos-list');
+  if (listEl) {
+    if (abonosList.length === 0) {
+      listEl.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-slate-400 text-xs">Sin abonos cobrados en este turno.</td></tr>`;
+    } else {
+      listEl.innerHTML = abonosList.map(a => `
+        <tr class="hover:bg-slate-50">
+          <td class="p-2 text-slate-400 text-[10px]">${new Date(a.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+          <td class="p-2 font-bold text-slate-800">${a.customer_name}</td>
+          <td class="p-2 text-slate-600">${a.user_name}</td>
+          <td class="p-2 text-right font-black text-emerald-600">S/ ${a.amount.toFixed(2)}</td>
+        </tr>
+      `).join('');
+    }
+  }
 
   document.getElementById('modal-close-register').classList.remove('hidden');
 }
@@ -381,7 +475,11 @@ function closeCloseRegisterModal() {
 
 function calculateCashDifference() {
   if (!currentCashRegister) return;
-  const expectedCash = currentCashRegister.opening_amount + currentCashRegister.cash_sales;
+  const initial = parseFloat(currentCashRegister.opening_amount) || 0;
+  const cashSales = parseFloat(currentCashRegister.cash_sales) || 0;
+  const abonos = parseFloat(currentCashRegister.fiado_abonos) || 0;
+  const retiros = parseFloat(currentCashRegister.total_withdrawals) || 0;
+  const expectedCash = currentCashRegister.expected_cash !== undefined ? currentCashRegister.expected_cash : (initial + cashSales + abonos - retiros);
   const actualCash = parseFloat(document.getElementById('input-actual-cash').value) || 0;
   const diff = actualCash - expectedCash;
 
@@ -489,6 +587,7 @@ async function loadSalesHistory() {
     const data = await res.json();
     
     currentReportSales = data.sales || [];
+    currentReportAbonos = data.abonos || [];
 
     document.getElementById('rep-total-sales').innerText = `S/ ${(data.summary.totalSales || 0).toFixed(2)}`;
     document.getElementById('rep-net-profit').innerText = `S/ ${(data.summary.totalProfit || 0).toFixed(2)}`;
@@ -496,13 +595,16 @@ async function loadSalesHistory() {
     document.getElementById('rep-avg-ticket').innerText = `S/ ${(data.summary.averageTicket || 0).toFixed(2)}`;
 
     // Desglose de Métodos de Pago
-    const bd = data.summary.breakdown || { cash: 0, card: 0, transfer: 0, fiado: 0 };
+    const bd = data.summary.breakdown || { cash: 0, card: 0, transfer: 0, fiado: 0, fiadoAbonos: 0 };
     document.getElementById('rep-breakdown-cash').innerText = `S/ ${bd.cash.toFixed(2)}`;
     document.getElementById('rep-breakdown-card').innerText = `S/ ${bd.card.toFixed(2)}`;
     document.getElementById('rep-breakdown-transfer').innerText = `S/ ${bd.transfer.toFixed(2)}`;
     document.getElementById('rep-breakdown-fiado').innerText = `S/ ${bd.fiado.toFixed(2)}`;
+    if (document.getElementById('rep-breakdown-abono')) {
+      document.getElementById('rep-breakdown-abono').innerText = `S/ ${(bd.fiadoAbonos || 0).toFixed(2)}`;
+    }
 
-    renderSalesHistoryTable(currentReportSales);
+    renderSalesHistoryTable(currentReportSales, currentReportAbonos);
   } catch (err) {
     console.error('Error cargando historial de ventas:', err);
   }
@@ -737,6 +839,13 @@ function updateCartQty(productId, delta) {
   focusSearchInput();
 }
 
+function removeFromCart(productId) {
+  CART = CART.filter(i => i.product.id !== productId);
+  playBeep('success');
+  renderCart();
+  focusSearchInput();
+}
+
 function clearCart() {
   CART = [];
   renderCart();
@@ -765,17 +874,20 @@ function renderCart() {
     const itemSubtotal = i.product.price * i.quantity;
     total += itemSubtotal;
     return `
-      <div class="py-3 flex justify-between items-center gap-2">
+      <div class="py-3 flex justify-between items-center gap-2 border-b border-slate-100 last:border-0">
         <div class="flex-1 min-w-0">
           <p class="font-bold text-xs text-slate-800 truncate">${i.product.name}</p>
           <p class="text-[10px] text-slate-400">S/ ${i.product.price.toFixed(2)} c/u</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1">
           <button onclick="updateCartQty(${i.product.id}, -1)" class="w-6 h-6 bg-slate-100 text-slate-600 rounded-md font-bold text-xs hover:bg-slate-200">-</button>
-          <span class="font-bold text-xs text-slate-800 w-4 text-center">${i.quantity}</span>
+          <span class="font-bold text-xs text-slate-800 w-5 text-center">${i.quantity}</span>
           <button onclick="updateCartQty(${i.product.id}, 1)" class="w-6 h-6 bg-slate-100 text-slate-600 rounded-md font-bold text-xs hover:bg-slate-200">+</button>
         </div>
-        <span class="font-black text-xs text-slate-900 w-16 text-right">S/ ${itemSubtotal.toFixed(2)}</span>
+        <span class="font-black text-xs text-slate-900 w-14 text-right">S/ ${itemSubtotal.toFixed(2)}</span>
+        <button onclick="removeFromCart(${i.product.id})" class="w-6 h-6 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-md flex items-center justify-center transition-colors" title="Quitar del carrito">
+          <i class="fa-solid fa-xmark text-xs font-bold"></i>
+        </button>
       </div>
     `;
   }).join('');
@@ -794,8 +906,13 @@ function renderCart() {
 // ==========================================
 function populateCustomerDropdown() {
   const select = document.getElementById('modal-select-customer');
-  select.innerHTML = '<option value="">Público General</option>' + 
+  const editSelect = document.getElementById('edit-sale-customer');
+
+  const optionsHTML = '<option value="">Público General</option>' + 
     CLIENTS.map(c => `<option value="${c.id}">${c.name} (${c.doc}) ${c.debt > 0 ? '- Deuda: S/ ' + c.debt.toFixed(2) : ''}</option>`).join('');
+
+  if (select) select.innerHTML = optionsHTML;
+  if (editSelect) editSelect.innerHTML = optionsHTML;
 }
 
 function openPaymentModal() {
@@ -831,7 +948,34 @@ function selectDocType(type) {
   document.querySelectorAll('.doc-btn').forEach(b => {
     b.className = 'doc-btn bg-white border border-slate-300 text-slate-600 font-bold py-2 rounded-lg text-xs hover:bg-slate-100';
   });
-  document.getElementById('doc-' + type).className = 'doc-btn active bg-blue-600 text-white font-bold py-2 rounded-lg text-xs shadow-md';
+  const btn = document.getElementById('doc-' + type);
+  if (btn) btn.className = 'doc-btn active bg-blue-600 text-white font-bold py-2 rounded-lg text-xs shadow-md';
+
+  const boletaBox = document.getElementById('doc-fields-boleta');
+  const facturaBox = document.getElementById('doc-fields-factura');
+  if (boletaBox) boletaBox.classList.toggle('hidden', type !== 'Boleta');
+  if (facturaBox) facturaBox.classList.toggle('hidden', type !== 'Factura');
+
+  onPaymentCustomerChange();
+}
+
+function onPaymentCustomerChange() {
+  const customerId = document.getElementById('modal-select-customer').value;
+  const customerObj = CLIENTS.find(c => String(c.id) === String(customerId));
+
+  if (customerObj) {
+    if (selectedDocType === 'Boleta') {
+      const dniEl = document.getElementById('boleta-dni');
+      const nameEl = document.getElementById('boleta-name');
+      if (dniEl) dniEl.value = customerObj.doc || '';
+      if (nameEl) nameEl.value = customerObj.name || '';
+    } else if (selectedDocType === 'Factura') {
+      const rucEl = document.getElementById('factura-ruc');
+      const razonEl = document.getElementById('factura-razon');
+      if (rucEl) rucEl.value = customerObj.doc || '';
+      if (razonEl) razonEl.value = customerObj.name || '';
+    }
+  }
 }
 
 function selectPaymentMethod(method) {
@@ -868,19 +1012,82 @@ function calculateChange() {
 }
 
 async function processFinalSale() {
-  const customerId = document.getElementById('modal-select-customer').value;
-  const customerObj = CLIENTS.find(c => String(c.id) === String(customerId));
-  const customerName = customerObj ? customerObj.name : 'Público General';
+  let customerId = document.getElementById('modal-select-customer').value;
+  let customerObj = CLIENTS.find(c => String(c.id) === String(customerId));
+  let customerName = customerObj ? customerObj.name : 'Público General';
 
-  if (selectedPaymentMethod === 'Fiado' && !customerId) {
-    playBeep('error');
-    alert('⚠️ Para vender al FIADO debe seleccionar un cliente registrado.');
-    return;
+  // Manejo dinámico para Boleta
+  if (selectedDocType === 'Boleta') {
+    const dni = (document.getElementById('boleta-dni')?.value || '').trim();
+    const name = (document.getElementById('boleta-name')?.value || '').trim();
+    if (name) {
+      customerName = dni ? `${name} (DNI: ${dni})` : name;
+    }
+  }
+
+  // Manejo dinámico para Factura
+  if (selectedDocType === 'Factura') {
+    const ruc = (document.getElementById('factura-ruc')?.value || '').trim();
+    const razon = (document.getElementById('factura-razon')?.value || '').trim();
+    if (!razon && !customerObj) {
+      playBeep('error');
+      alert('⚠️ Para emitir una Factura debe ingresar la Razón Social y RUC (11 dígitos) o seleccionar un cliente.');
+      return;
+    }
+    if (razon) {
+      customerName = ruc ? `${razon} (RUC: ${ruc})` : razon;
+    }
+  }
+
+  // Si seleccionó FIADO
+  if (selectedPaymentMethod === 'Fiado') {
+    if (!customerId) {
+      // Intentar auto-registrar cliente si se ingresaron datos manuales
+      let docInput = '';
+      let nameInput = '';
+      if (selectedDocType === 'Factura') {
+        docInput = (document.getElementById('factura-ruc')?.value || '').trim();
+        nameInput = (document.getElementById('factura-razon')?.value || '').trim();
+      } else {
+        docInput = (document.getElementById('boleta-dni')?.value || '').trim();
+        nameInput = (document.getElementById('boleta-name')?.value || '').trim();
+      }
+
+      if (!docInput || !nameInput) {
+        playBeep('error');
+        alert('⚠️ Para vender al FIADO debe seleccionar un cliente registrado de la lista o ingresar su DNI/RUC y Nombre / Razón Social.');
+        return;
+      }
+
+      try {
+        const custRes = await fetch('/api/customers', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ doc: docInput, name: nameInput, phone: '' })
+        });
+        const newCust = await custRes.json();
+        if (custRes.ok && newCust.id) {
+          customerId = String(newCust.id);
+          customerName = newCust.name;
+          await loadCustomers();
+        } else {
+          throw new Error(newCust.error || 'Error al auto-registrar el cliente');
+        }
+      } catch (e) {
+        playBeep('error');
+        alert('⚠️ ' + e.message);
+        return;
+      }
+    }
   }
 
   let total = CART.reduce((sum, i) => sum + (i.product.price * i.quantity), 0);
   const paidAmount = parseFloat(document.getElementById('input-paid-amount').value) || total;
   const changeAmount = paidAmount > total ? paidAmount - total : 0;
+
+  // Confirmación previa al cobro
+  const confirmMsg = `¿Confirmar cobro por S/ ${total.toFixed(2)}?\n\n- Comprobante: ${selectedDocType}\n- Método: ${selectedPaymentMethod}\n- Cliente: ${customerName}`;
+  if (!confirm(confirmMsg)) return;
 
   const payload = {
     doc_type: selectedDocType,
@@ -982,14 +1189,62 @@ function renderInventoryTable() {
         <td class="p-4 text-slate-500">S/ ${(p.purchase_price || 0).toFixed(2)}</td>
         <td class="p-4 font-bold text-slate-900">S/ ${p.price.toFixed(2)}</td>
         <td class="p-4"><span class="${isLow ? 'text-rose-600 bg-rose-100 border border-rose-200' : 'text-emerald-600 bg-emerald-100'} px-2.5 py-1 rounded font-bold text-xs">${p.stock} und.</span></td>
-        ${isAdmin ? `
-          <td class="p-4 text-center space-x-2">
-            <button onclick="deleteProduct(${p.id})" class="text-rose-400 hover:text-rose-600 font-bold text-xs"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button>
-          </td>
-        ` : ''}
+        <td class="p-4 text-center space-x-2">
+          <button onclick="openStockIntakeModal(${p.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Registrar ingreso de stock por Guía o Factura">
+            <i class="fa-solid fa-boxes-packing mr-1"></i>+ Ingresar Stock
+          </button>
+          ${isAdmin ? `
+            <button onclick="deleteProduct(${p.id})" class="text-rose-400 hover:text-rose-600 font-bold text-xs ml-2"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button>
+          ` : ''}
+        </td>
       </tr>
     `;
   }).join('');
+}
+
+function openStockIntakeModal(productId) {
+  const prod = PRODUCTS.find(p => p.id === productId);
+  if (!prod) return;
+
+  document.getElementById('form-stock-intake').reset();
+  document.getElementById('stock-intake-prod-id').value = prod.id;
+  document.getElementById('stock-intake-prod-name').value = `${prod.name} (Stock Actual: ${prod.stock} unds.)`;
+  document.getElementById('modal-stock-intake').classList.remove('hidden');
+}
+
+function closeStockIntakeModal() {
+  document.getElementById('modal-stock-intake').classList.add('hidden');
+  focusSearchInput();
+}
+
+async function saveStockIntake(e) {
+  e.preventDefault();
+  const prodId = document.getElementById('stock-intake-prod-id').value;
+  const quantity = document.getElementById('stock-intake-qty').value;
+  const doc_type = document.getElementById('stock-intake-doc-type').value;
+  const doc_number = document.getElementById('stock-intake-doc-number').value.trim();
+  const new_purchase_price = document.getElementById('stock-intake-new-purchase').value;
+  const new_price = document.getElementById('stock-intake-new-price').value;
+  const supplier_notes = document.getElementById('stock-intake-notes').value.trim();
+
+  try {
+    const res = await fetch(`/api/products/${prodId}/stock`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error registrando ingreso de stock');
+
+    closeStockIntakeModal();
+    await loadProducts();
+    await loadDashboard();
+    playBeep('success');
+    alert('✅ ' + data.message);
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
 }
 
 function openProductModal() {
@@ -1198,11 +1453,32 @@ async function processAbono() {
     if (!res.ok) throw new Error(data.error || 'Error registrando abono');
 
     playBeep('success');
-    alert(`✅ ${data.message}`);
+    closeFiadoModal();
+
+    // Renderizar Recibo Térmico de Abono
+    document.getElementById('rec-title').innerText = 'COMPROBANTE DE ABONO DE DEUDA';
+    document.getElementById('rec-id').innerText = data.receipt_code || `AB-${String(Date.now()).slice(-6)}`;
+    document.getElementById('rec-customer').innerText = 'Cliente: ' + (data.customer_name || currentActiveCustomerForFiado.name);
+    document.getElementById('rec-date').innerText = new Date().toLocaleString();
+    document.getElementById('rec-total').innerText = `S/ ${amount.toFixed(2)}`;
+    document.getElementById('rec-method').innerText = 'Abono en Efectivo';
+    document.getElementById('rec-paid').innerText = `S/ ${amount.toFixed(2)}`;
+    document.getElementById('rec-change').innerText = `S/ ${(data.newDebt || 0).toFixed(2)}`;
+
+    document.getElementById('rec-items').innerHTML = `
+      <div class="py-2 space-y-1">
+        <p class="font-bold text-xs text-slate-800">PAGO / ABONO A CUENTA FIADO</p>
+        <p class="text-[10px] text-slate-500">Cajero que Cobró: ${data.user_name || (currentUser ? currentUser.name : 'Sistema')}</p>
+        <p class="text-xs text-emerald-600 font-black pt-1">Monto Cobrado: S/ ${amount.toFixed(2)}</p>
+        <p class="text-xs text-slate-800 font-bold">Saldo Deuda Restante: S/ ${(data.newDebt || 0).toFixed(2)}</p>
+      </div>
+    `;
+
+    document.getElementById('modal-receipt').classList.remove('hidden');
+
     await loadCustomers();
     await loadDashboard();
     await loadCurrentCashRegister();
-    openFiadoModal(currentActiveCustomerForFiado.id);
   } catch (err) {
     playBeep('error');
     alert('❌ Error: ' + err.message);
@@ -1210,41 +1486,145 @@ async function processAbono() {
 }
 
 // ==========================================
-// 4. REPORTES & HISTORIAL DE VENTAS CON AUDITORÍA
+// 4. REPORTES & HISTORIAL DE VENTAS CON EDITAR/ANULAR POR ADMIN
 // ==========================================
-function renderSalesHistoryTable(sales) {
+function renderSalesHistoryTable(sales = [], abonos = []) {
   const tbody = document.getElementById('history-table-body');
   if (!tbody) return;
 
-  if (sales.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-slate-400">No hay ventas registradas en el período seleccionado.</td></tr>`;
+  const isAdmin = currentUser && currentUser.role === 'Admin';
+  const combined = [];
+
+  sales.forEach(s => {
+    combined.push({
+      id: s.id,
+      code: s.receipt_code,
+      date: new Date(s.created_at),
+      customer: s.customer_name,
+      user: s.user_name || 'Sistema',
+      docType: s.doc_type,
+      paymentMethod: s.payment_method,
+      amount: s.total,
+      profit: s.profit || 0,
+      status: s.status,
+      isAbono: false
+    });
+  });
+
+  abonos.forEach(a => {
+    combined.push({
+      id: a.id,
+      code: `AB-${String(a.id).padStart(5, '0')}`,
+      date: new Date(a.created_at),
+      customer: `${a.customer_name} ${a.customer_doc && a.customer_doc !== '-' ? '(DNI/RUC: ' + a.customer_doc + ')' : ''}`,
+      user: a.user_name || 'Sistema',
+      docType: 'RECIBO ABONO',
+      paymentMethod: 'Efectivo (Abono)',
+      amount: a.amount,
+      profit: 0,
+      status: 'completada',
+      isAbono: true
+    });
+  });
+
+  combined.sort((a, b) => b.date - a.date);
+
+  if (combined.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-slate-400">No hay ventas ni abonos registrados en el período seleccionado.</td></tr>`;
     return;
   }
 
-  const isAdmin = currentUser && currentUser.role === 'Admin';
-
-  tbody.innerHTML = sales.map(s => `
-    <tr class="hover:bg-slate-50 ${s.status === 'anulada' ? 'bg-slate-100/50 opacity-70' : ''}">
-      <td class="p-4 font-bold text-slate-800">${s.receipt_code}</td>
-      <td class="p-4 text-slate-500 text-xs">${new Date(s.created_at).toLocaleString()}</td>
-      <td class="p-4 text-slate-800 text-xs font-semibold">${s.customer_name}</td>
-      <td class="p-4 text-slate-700 text-xs font-bold"><i class="fa-solid fa-user-tag text-blue-500 mr-1"></i>${s.user_name || 'Sistema'}</td>
-      <td class="p-4"><span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[10px] font-bold uppercase">${s.doc_type}</span></td>
-      <td class="p-4"><span class="${s.payment_method === 'Fiado' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'} px-2 py-1 rounded text-[10px] font-bold uppercase">${s.payment_method}</span></td>
-      <td class="p-4 text-right font-black text-slate-900">S/ ${s.total.toFixed(2)}</td>
-      ${isAdmin ? `<td class="p-4 text-right font-bold text-emerald-600">S/ ${(s.profit || 0).toFixed(2)}</td>` : ''}
+  tbody.innerHTML = combined.map(item => `
+    <tr class="hover:bg-slate-50 ${item.status === 'anulada' ? 'bg-slate-100/50 opacity-70' : (item.isAbono ? 'bg-emerald-50/40' : '')}">
+      <td class="p-4 font-bold ${item.isAbono ? 'text-emerald-700 font-mono' : 'text-slate-800'}">${item.code}</td>
+      <td class="p-4 text-slate-500 text-xs">${item.date.toLocaleString()}</td>
+      <td class="p-4 text-slate-800 text-xs font-semibold">${item.customer}</td>
+      <td class="p-4 text-slate-700 text-xs font-bold"><i class="fa-solid fa-user-tag text-blue-500 mr-1"></i>${item.user}</td>
+      <td class="p-4"><span class="${item.isAbono ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'} px-2 py-1 rounded text-[10px] font-bold uppercase">${item.docType}</span></td>
+      <td class="p-4"><span class="${item.isAbono ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : (item.paymentMethod === 'Fiado' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800')} px-2 py-1 rounded text-[10px] font-bold uppercase">${item.paymentMethod}</span></td>
+      <td class="p-4 text-right font-black ${item.isAbono ? 'text-emerald-600' : 'text-slate-900'}">S/ ${item.amount.toFixed(2)}</td>
+      ${isAdmin ? `<td class="p-4 text-right font-bold text-emerald-600">${item.isAbono ? '-' : 'S/ ' + item.profit.toFixed(2)}</td>` : ''}
       ${isAdmin ? `
-        <td class="p-4 text-center">
-          ${s.status === 'anulada' 
-            ? '<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold">Anulada</span>'
-            : `<button onclick="anularVenta(${s.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-800 font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors">
-                 <i class="fa-solid fa-trash mr-1"></i>Anular
-               </button>`
-          }
+        <td class="p-4 text-center space-x-1">
+          ${item.isAbono ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Abono Cobrado</span>' : (
+            item.status === 'anulada' 
+              ? '<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold">Anulada</span>'
+              : `
+                 <button onclick="openEditSaleModal(${item.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Editar datos de venta">
+                   <i class="fa-solid fa-pen-to-square mr-1"></i>Editar
+                 </button>
+                 <button onclick="anularVenta(${item.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Anular venta">
+                   <i class="fa-solid fa-trash mr-1"></i>Anular
+                 </button>
+                `
+          )}
         </td>
       ` : ''}
     </tr>
   `).join('');
+}
+
+function openEditSaleModal(saleId) {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede editar ventas.');
+    return;
+  }
+
+  const sale = currentReportSales.find(s => s.id === saleId);
+  if (!sale) return;
+
+  document.getElementById('edit-sale-id').value = sale.id;
+  document.getElementById('edit-sale-code').innerText = `#${sale.receipt_code}`;
+  document.getElementById('edit-sale-doctype').value = sale.doc_type;
+  document.getElementById('edit-sale-payment').value = sale.payment_method;
+  document.getElementById('edit-sale-customer').value = sale.customer_id || '';
+
+  document.getElementById('modal-edit-sale').classList.remove('hidden');
+}
+
+function closeEditSaleModal() {
+  document.getElementById('modal-edit-sale').classList.add('hidden');
+}
+
+async function processSaveEditSale(e) {
+  e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
+
+  const saleId = document.getElementById('edit-sale-id').value;
+  const doc_type = document.getElementById('edit-sale-doctype').value;
+  const payment_method = document.getElementById('edit-sale-payment').value;
+  const customer_id = document.getElementById('edit-sale-customer').value;
+
+  const customerObj = CLIENTS.find(c => String(c.id) === String(customer_id));
+  const customer_name = customerObj ? customerObj.name : 'Público General';
+
+  try {
+    const res = await fetch(`/api/sales/${saleId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        doc_type,
+        payment_method,
+        customer_id: customer_id ? parseInt(customer_id) : null,
+        customer_name
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error editando venta');
+
+    closeEditSaleModal();
+    playBeep('success');
+    alert('✅ Venta actualizada correctamente por Administrador.');
+    await loadSalesHistory();
+    await loadCustomers();
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
 }
 
 async function anularVenta(saleId) {
@@ -1265,7 +1645,7 @@ async function anularVenta(saleId) {
     await loadDashboard();
   } catch (err) {
     playBeep('error');
-    alert('❌ ' + err.message);
+    alert('❌ Error: ' + err.message);
   }
 }
 

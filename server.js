@@ -247,6 +247,90 @@ app.put('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// REABASTECIMIENTO DE STOCK DE PRODUCTO CON GUÍA DE REMISIÓN / FACTURA
+app.post('/api/products/:id/stock', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price } = req.body;
+  const qty = parseInt(quantity);
+
+  if (isNaN(qty) || qty <= 0) {
+    return res.status(400).json({ error: 'La cantidad a ingresar debe ser un número entero mayor a 0.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const prodRes = await client.query('SELECT id, name, stock, purchase_price, price FROM products WHERE id = $1 FOR UPDATE', [id]);
+    const product = prodRes.rows[0];
+
+    if (!product) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Producto no encontrado.' });
+    }
+
+    const updatedStock = product.stock + qty;
+    const updateFields = ['stock = $1'];
+    const updateParams = [updatedStock];
+    let paramIdx = 2;
+
+    if (new_purchase_price !== undefined && new_purchase_price !== null && new_purchase_price !== '') {
+      updateFields.push(`purchase_price = $${paramIdx}`);
+      updateParams.push(parseFloat(new_purchase_price) || 0);
+      paramIdx++;
+    }
+    if (new_price !== undefined && new_price !== null && new_price !== '') {
+      updateFields.push(`price = $${paramIdx}`);
+      updateParams.push(parseFloat(new_price) || product.price);
+      paramIdx++;
+    }
+
+    updateParams.push(id);
+    await client.query(`UPDATE products SET ${updateFields.join(', ')} WHERE id = $${paramIdx - 1}`, updateParams);
+
+    const docTypeFinal = doc_type || 'Guía de Remisión';
+    const docNumFinal = doc_number ? doc_number.trim() : '';
+    const notesFinal = supplier_notes ? supplier_notes.trim() : '';
+
+    await client.query(`
+      INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
+      VALUES ($1, $2, $3, 'INGRESO', $4, $5, $6, $7, $8)
+    `, [id, product.name, qty, docTypeFinal, docNumFinal, notesFinal, req.user.id, req.user.name]);
+
+    await client.query('COMMIT');
+
+    io.emit('products_changed');
+
+    res.json({
+      success: true,
+      message: `Stock de "${product.name}" incrementado en +${qty} unds. (Total en stock: ${updatedStock})`,
+      newStock: updatedStock
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error registrando ingreso de stock:', err.message);
+    res.status(500).json({ error: 'Error al ingresar stock de producto.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/inventory/movements', authMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT 
+        sm.id, sm.product_id, sm.product_name, sm.quantity, sm.type, sm.doc_type, sm.doc_number, sm.supplier_notes, sm.user_id, COALESCE(sm.user_name, 'Sistema') AS user_name, sm.created_at
+      FROM stock_movements sm
+      ORDER BY sm.id DESC
+      LIMIT 200
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('❌ Error obteniendo movimientos de inventario:', err.message);
+    res.status(500).json({ error: 'Error al consultar ingresos de stock.' });
+  }
+});
+
 app.delete('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
   try {
@@ -316,6 +400,8 @@ app.get('/api/cash-register/current', async (req, res) => {
         card_sales::float AS card_sales, 
         transfer_sales::float AS transfer_sales, 
         fiado_sales::float AS fiado_sales, 
+        COALESCE(fiado_abonos, 0)::float AS fiado_abonos,
+        COALESCE(total_withdrawals, 0)::float AS total_withdrawals,
         expected_cash::float AS expected_cash, 
         actual_cash::float AS actual_cash, 
         difference::float AS difference, 
@@ -326,7 +412,22 @@ app.get('/api/cash-register/current', async (req, res) => {
       WHERE status = 'abierta' 
       ORDER BY id DESC LIMIT 1
     `);
-    res.json(result.rows[0] || null);
+    const reg = result.rows[0] || null;
+    if (reg) {
+      reg.expected_cash = (parseFloat(reg.opening_amount) || 0) + (parseFloat(reg.cash_sales) || 0) + (parseFloat(reg.fiado_abonos) || 0) - (parseFloat(reg.total_withdrawals) || 0);
+      const movs = await db.query("SELECT id, user_id, user_name, type, amount::float AS amount, reason, created_at FROM cash_movements WHERE cash_register_id = $1 ORDER BY id DESC", [reg.id]);
+      reg.movements = movs.rows;
+
+      const abonosRes = await db.query(`
+        SELECT fp.id, fp.customer_id, COALESCE(c.name, 'Cliente Registrado') AS customer_name, COALESCE(c.doc, '-') AS customer_doc, COALESCE(fp.user_name, 'Sistema') AS user_name, fp.amount::float AS amount, fp.details, fp.created_at
+        FROM fiado_payments fp
+        LEFT JOIN customers c ON c.id = fp.customer_id
+        WHERE fp.type = 'ABONO' AND fp.created_at >= $1
+        ORDER BY fp.id DESC
+      `, [reg.opened_at]);
+      reg.shift_abonos = abonosRes.rows;
+    }
+    res.json(reg);
   } catch (err) {
     console.error('❌ Error obteniendo caja actual:', err.message);
     res.status(500).json({ error: 'Error obteniendo estado de caja.' });
@@ -359,6 +460,64 @@ app.post('/api/cash-register/open', authMiddleware, async (req, res) => {
   }
 });
 
+// RETIRO DE EFECTIVO DE CAJA CON MOTIVO (Exclusivo Administrador)
+app.post('/api/cash-register/movement', authMiddleware, adminOnly, async (req, res) => {
+  const { amount, reason } = req.body;
+  const withdrawalAmt = parseFloat(amount);
+
+  if (isNaN(withdrawalAmt) || withdrawalAmt <= 0) {
+    return res.status(400).json({ error: 'El monto del retiro debe ser un número mayor a 0.' });
+  }
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'Debe ingresar un motivo o concepto para el retiro de caja.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const activeRes = await client.query("SELECT * FROM cash_registers WHERE status = 'abierta' ORDER BY id DESC LIMIT 1 FOR UPDATE");
+    const activeRegister = activeRes.rows[0];
+
+    if (!activeRegister) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No hay ninguna caja abierta para registrar el retiro.' });
+    }
+
+    await client.query(`
+      INSERT INTO cash_movements (cash_register_id, user_id, user_name, type, amount, reason)
+      VALUES ($1, $2, $3, 'RETIRO', $4, $5)
+    `, [activeRegister.id, req.user.id, req.user.name, withdrawalAmt, reason.trim()]);
+
+    const newWithdrawals = (parseFloat(activeRegister.total_withdrawals) || 0) + withdrawalAmt;
+    const newExpected = (parseFloat(activeRegister.opening_amount) || 0) + (parseFloat(activeRegister.cash_sales) || 0) + (parseFloat(activeRegister.fiado_abonos) || 0) - newWithdrawals;
+
+    await client.query(`
+      UPDATE cash_registers 
+      SET total_withdrawals = $1, expected_cash = $2 
+      WHERE id = $3
+    `, [newWithdrawals, newExpected, activeRegister.id]);
+
+    await client.query('COMMIT');
+
+    io.emit('cash_register_changed');
+
+    res.json({
+      success: true,
+      message: `Retiro de S/ ${withdrawalAmt.toFixed(2)} registrado correctamente por ${req.user.name}`,
+      newWithdrawals,
+      newExpected
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error registrando retiro de caja:', err.message);
+    res.status(500).json({ error: 'Error al registrar el retiro de caja.' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/cash-register/close', authMiddleware, async (req, res) => {
   const { actual_cash, notes } = req.body;
   const actualAmt = parseFloat(actual_cash) || 0;
@@ -371,7 +530,10 @@ app.post('/api/cash-register/close', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'No hay ninguna caja abierta para cerrar.' });
     }
 
-    const expectedCash = parseFloat(activeRegister.opening_amount) + parseFloat(activeRegister.cash_sales);
+    const expectedCash = (parseFloat(activeRegister.opening_amount) || 0) + 
+                         (parseFloat(activeRegister.cash_sales) || 0) + 
+                         (parseFloat(activeRegister.fiado_abonos) || 0) - 
+                         (parseFloat(activeRegister.total_withdrawals) || 0);
     const difference = actualAmt - expectedCash;
 
     const updateQuery = `
@@ -454,6 +616,7 @@ app.get('/api/sales', async (req, res) => {
         s.id, 
         s.receipt_code, 
         s.doc_type, 
+        s.customer_id,
         s.customer_name, 
         s.payment_method, 
         s.user_id,
@@ -480,7 +643,7 @@ app.get('/api/sales', async (req, res) => {
 
     let totalSales = 0;
     let totalProfit = 0;
-    let breakdown = { cash: 0, card: 0, transfer: 0, fiado: 0 };
+    let breakdown = { cash: 0, card: 0, transfer: 0, fiado: 0, fiadoAbonos: 0 };
 
     sales.forEach(s => {
       totalSales += s.total;
@@ -491,6 +654,35 @@ app.get('/api/sales', async (req, res) => {
       else if (s.payment_method === 'Yape/Plin') breakdown.transfer += s.total;
       else if (s.payment_method === 'Fiado') breakdown.fiado += s.total;
     });
+
+    // Consultar abonos de fiados para el informe de reportes
+    let abonoConditions = ["fp.type = 'ABONO'"];
+    let abonoParams = [];
+    let abonoIdx = 1;
+
+    if (startDate) {
+      abonoConditions.push(`DATE(fp.created_at) >= $${abonoIdx}`);
+      abonoParams.push(startDate);
+      abonoIdx++;
+    }
+    if (endDate) {
+      abonoConditions.push(`DATE(fp.created_at) <= $${abonoIdx}`);
+      abonoParams.push(endDate);
+      abonoIdx++;
+    }
+
+    const abonosResult = await db.query(`
+      SELECT fp.id, fp.customer_id, COALESCE(c.name, 'Cliente Registrado') AS customer_name, COALESCE(c.doc, '-') AS customer_doc, COALESCE(fp.user_name, 'Sistema') AS user_name, fp.type, fp.amount::float AS amount, fp.details, fp.created_at
+      FROM fiado_payments fp
+      LEFT JOIN customers c ON c.id = fp.customer_id
+      WHERE ${abonoConditions.join(' AND ')}
+      ORDER BY fp.id DESC
+    `, abonoParams);
+
+    const abonos = abonosResult.rows;
+    let totalFiadoAbonos = 0;
+    abonos.forEach(a => { totalFiadoAbonos += a.amount; });
+    breakdown.fiadoAbonos = totalFiadoAbonos;
 
     const ticketsCount = sales.length;
     const averageTicket = ticketsCount > 0 ? totalSales / ticketsCount : 0;
@@ -503,12 +695,81 @@ app.get('/api/sales', async (req, res) => {
         averageTicket,
         breakdown
       },
-      sales
+      sales,
+      abonos
     });
 
   } catch (err) {
     console.error('❌ Error filtrando ventas:', err.message);
     res.status(500).json({ error: 'Error al consultar reporte de ventas.' });
+  }
+});
+
+// EDITAR VENTA (Solo Administrador - Permite ajustar método de pago, cliente y comprobante)
+app.put('/api/sales/:id', authMiddleware, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { doc_type, payment_method, customer_id, customer_name } = req.body;
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const saleRes = await client.query('SELECT * FROM sales WHERE id = $1 FOR UPDATE', [id]);
+    const oldSale = saleRes.rows[0];
+
+    if (!oldSale || oldSale.status === 'anulada') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'La venta no existe o está anulada.' });
+    }
+
+    // Si cambió el método de pago a/desde FIADO, ajustar la deuda del cliente
+    const oldTotal = parseFloat(oldSale.total);
+    
+    // 1. Revertir impacto de la antigua venta fiada si la había
+    if (oldSale.payment_method === 'Fiado' && oldSale.customer_id) {
+      const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [oldSale.customer_id]);
+      if (custRes.rows[0]) {
+        const revertedDebt = Math.max(0, custRes.rows[0].debt - oldTotal);
+        await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [revertedDebt, oldSale.customer_id]);
+      }
+    }
+
+    // 2. Aplicar impacto del nuevo método de pago si es Fiado
+    let finalCustId = customer_id !== undefined ? customer_id : oldSale.customer_id;
+    let finalCustName = customer_name !== undefined ? customer_name : oldSale.customer_name;
+    let finalDocType = doc_type || oldSale.doc_type;
+    let finalPayMethod = payment_method || oldSale.payment_method;
+
+    if (finalPayMethod === 'Fiado' && finalCustId) {
+      const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [finalCustId]);
+      if (custRes.rows[0]) {
+        const newDebt = custRes.rows[0].debt + oldTotal;
+        await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, finalCustId]);
+      }
+    }
+
+    // 3. Actualizar la venta
+    const updateQuery = `
+      UPDATE sales 
+      SET doc_type = $1, payment_method = $2, customer_id = $3, customer_name = $4
+      WHERE id = $5
+      RETURNING *
+    `;
+    const result = await client.query(updateQuery, [finalDocType, finalPayMethod, finalCustId || null, finalCustName || 'Público General', id]);
+
+    await client.query('COMMIT');
+
+    io.emit('sales_changed');
+    io.emit('customers_changed');
+
+    res.json({ success: true, message: 'Venta actualizada correctamente', sale: result.rows[0] });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error editando venta:', err.message);
+    res.status(500).json({ error: 'Error al editar la venta.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -724,18 +985,27 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
     await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, customer_id]);
 
     await client.query(`
-      INSERT INTO fiado_payments (customer_id, type, amount, details, balance_after)
-      VALUES ($1, 'ABONO', $2, 'Abono / Pago en efectivo', $3)
-    `, [customer_id, abonoAmt, newDebt]);
+      INSERT INTO fiado_payments (customer_id, user_id, user_name, type, amount, details, balance_after)
+      VALUES ($1, $2, $3, 'ABONO', $4, 'Abono / Pago en efectivo', $5)
+    `, [customer_id, req.user.id, req.user.name, abonoAmt, newDebt]);
 
-    await client.query("UPDATE cash_registers SET cash_sales = cash_sales + $1 WHERE status = 'abierta'", [abonoAmt]);
+    await client.query("UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, cash_sales = cash_sales + $1 WHERE status = 'abierta'", [abonoAmt]);
 
     await client.query('COMMIT');
 
     io.emit('customers_changed');
     io.emit('cash_register_changed');
 
-    res.json({ success: true, message: `Abono de S/ ${abonoAmt.toFixed(2)} registrado correctamente`, newDebt });
+    const abonoCode = `AB-${String(Date.now()).slice(-6)}`;
+    res.json({
+      success: true,
+      message: `Abono de S/ ${abonoAmt.toFixed(2)} registrado correctamente por ${req.user.name}`,
+      receipt_code: abonoCode,
+      customer_name: customer.name,
+      user_name: req.user.name,
+      amount: abonoAmt,
+      newDebt
+    });
 
   } catch (err) {
     await client.query('ROLLBACK');

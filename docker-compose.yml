@@ -40,11 +40,12 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-valetec}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-valetec_secure_pass}
       - POSTGRES_DB=${POSTGRES_DB:-valeventas_db}
+      - JWT_SECRET=${JWT_SECRET:-valetec_jwt_super_secret_key_2026}
     depends_on:
       valeventas-db:
         condition: service_healthy
 
-  # Servicio de Frontend (Servidor Web Nginx)
+  # Servicio de Frontend (Nginx Reverse Proxy & Static UI)
   valeventas-frontend:
     build:
       context: .
@@ -52,6 +53,6 @@ services:
     container_name: valeventas-frontend
     restart: always
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${FRONTEND_PORT:-3005}:80"
     depends_on:
       - valeventas-backend

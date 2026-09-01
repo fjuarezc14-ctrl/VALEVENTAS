@@ -72,6 +72,8 @@ async function initDb() {
         card_sales NUMERIC(10,2) DEFAULT 0,
         transfer_sales NUMERIC(10,2) DEFAULT 0,
         fiado_sales NUMERIC(10,2) DEFAULT 0,
+        fiado_abonos NUMERIC(10,2) DEFAULT 0,
+        total_withdrawals NUMERIC(10,2) DEFAULT 0,
         expected_cash NUMERIC(10,2) DEFAULT 0,
         actual_cash NUMERIC(10,2) DEFAULT 0,
         difference NUMERIC(10,2) DEFAULT 0,
@@ -79,6 +81,22 @@ async function initDb() {
         notes VARCHAR(255) DEFAULT '',
         opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         closed_at TIMESTAMPTZ
+      );
+      ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS fiado_abonos NUMERIC(10,2) DEFAULT 0;
+      ALTER TABLE cash_registers ADD COLUMN IF NOT EXISTS total_withdrawals NUMERIC(10,2) DEFAULT 0;
+    `);
+
+    // 8. MOVIMIENTOS Y RETIROS DE CAJA EN EFECTIVO
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cash_movements (
+        id SERIAL PRIMARY KEY,
+        cash_register_id INT REFERENCES cash_registers(id) ON DELETE CASCADE,
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255) NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'RETIRO',
+        amount NUMERIC(10,2) NOT NULL,
+        reason VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -125,10 +143,31 @@ async function initDb() {
       CREATE TABLE IF NOT EXISTS fiado_payments (
         id SERIAL PRIMARY KEY,
         customer_id INT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255) DEFAULT 'Sistema',
         type VARCHAR(20) NOT NULL,
         amount NUMERIC(10,2) NOT NULL,
         balance_after NUMERIC(10,2) NOT NULL,
         details VARCHAR(255) DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE fiado_payments ADD COLUMN IF NOT EXISTS user_id INT;
+      ALTER TABLE fiado_payments ADD COLUMN IF NOT EXISTS user_name VARCHAR(255) DEFAULT 'Sistema';
+    `);
+
+    // 9. REABASTECIMIENTO Y MOVIMIENTOS DE INVENTARIO (GUÍA DE REMISIÓN / FACTURAS)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id SERIAL PRIMARY KEY,
+        product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        product_name VARCHAR(255) NOT NULL,
+        quantity INT NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'INGRESO',
+        doc_type VARCHAR(50) DEFAULT 'Guía de Remisión',
+        doc_number VARCHAR(100) DEFAULT '',
+        supplier_notes VARCHAR(255) DEFAULT '',
+        user_id INT REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(255) DEFAULT '',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);

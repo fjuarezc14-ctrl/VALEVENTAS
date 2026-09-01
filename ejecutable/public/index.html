@@ -248,7 +248,7 @@
                   <th class="p-4">P. Compra</th>
                   <th class="p-4">P. Venta</th>
                   <th class="p-4">Stock</th>
-                  <th class="p-4 text-center">Acciones / Reabastecimiento</th>
+                  <th class="p-4 text-center admin-only">Acciones</th>
                 </tr>
               </thead>
               <tbody id="inventory-table-body" class="divide-y divide-slate-100 font-medium"></tbody>
@@ -566,68 +566,6 @@
     </div>
   </div>
 
-  <!-- MODAL INGRESO DE MERCADERÍA / GUÍA DE REMISIÓN -->
-  <div id="modal-stock-intake" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4">
-      <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-        <h3 class="font-black text-lg text-slate-800 flex items-center gap-2">
-          <i class="fa-solid fa-boxes-packing text-blue-600"></i> Ingreso de Mercadería / Reabastecimiento
-        </h3>
-        <button onclick="closeStockIntakeModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-      </div>
-
-      <form id="form-stock-intake" onsubmit="saveStockIntake(event)" class="space-y-3">
-        <input type="hidden" id="stock-intake-prod-id">
-        <div>
-          <label class="text-xs font-bold text-slate-600 block mb-1">Producto a Reabastecer *</label>
-          <input type="text" id="stock-intake-prod-name" readonly class="w-full p-2.5 border border-blue-200 rounded-xl text-xs font-black text-blue-900 bg-blue-50/50">
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-xs font-bold text-slate-600 block mb-1">Cantidad a Ingresar (unds) *</label>
-            <input type="number" min="1" id="stock-intake-qty" required placeholder="ej. 50" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
-          <div>
-            <label class="text-xs font-bold text-slate-600 block mb-1">Tipo Comprobante Compra *</label>
-            <select id="stock-intake-doc-type" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
-              <option value="Guía de Remisión">Guía de Remisión</option>
-              <option value="Factura de Compra">Factura de Compra</option>
-              <option value="Boleta de Compra">Boleta de Compra</option>
-              <option value="Nota de Ingreso">Nota de Ingreso</option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label class="text-xs font-bold text-slate-600 block mb-1">N° de Guía / Comprobante (Opcional)</label>
-          <input type="text" id="stock-intake-doc-number" placeholder="ej. GR-001-004589" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-xs font-bold text-slate-600 block mb-1">Nuevo P. Compra (S/) [Opcional]</label>
-            <input type="number" step="0.10" id="stock-intake-new-purchase" placeholder="Opcional" class="w-full p-2 border border-slate-300 rounded-xl text-xs outline-none">
-          </div>
-          <div>
-            <label class="text-xs font-bold text-slate-600 block mb-1">Nuevo P. Venta (S/) [Opcional]</label>
-            <input type="number" step="0.50" id="stock-intake-new-price" placeholder="Opcional" class="w-full p-2 border border-slate-300 rounded-xl text-xs outline-none">
-          </div>
-        </div>
-
-        <div>
-          <label class="text-xs font-bold text-slate-600 block mb-1">Proveedor / Observaciones (Opcional)</label>
-          <input type="text" id="stock-intake-notes" placeholder="ej. Alicorp Perú S.A.A." class="w-full p-2.5 border border-slate-300 rounded-xl text-xs outline-none">
-        </div>
-
-        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
-          <button type="button" onclick="closeStockIntakeModal()" class="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl text-xs">Cancelar</button>
-          <button type="submit" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md">Confirmar Ingreso de Stock</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- MODAL APERTURA DE CAJA DIARIA -->
   <div id="modal-open-register" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
@@ -664,29 +602,6 @@
         <div class="flex justify-between"><span>Ventas a Fiado (Deudas):</span><span id="close-fiado-sales" class="font-bold text-amber-600">S/ 0.00</span></div>
         <div class="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
           <span>Efectivo Esperado en Caja:</span><span id="close-expected-cash" class="text-blue-600">S/ 0.00</span>
-        </div>
-
-        <!-- TABLA DETALLE DE ABONOS EN TURNO -->
-        <div id="close-shift-abonos-container" class="space-y-1 pt-2 border-t border-slate-200">
-          <p class="text-[11px] font-black text-slate-700 flex justify-between items-center">
-            <span>📋 Abonos Cobrados en este Turno:</span>
-            <span id="close-shift-abonos-total" class="text-emerald-600 font-bold">S/ 0.00</span>
-          </p>
-          <div class="max-h-32 overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl bg-white">
-            <table class="w-full text-left text-[11px] text-slate-600">
-              <thead class="bg-slate-100 text-slate-500 font-bold uppercase text-[10px] sticky top-0">
-                <tr>
-                  <th class="p-2">Hora</th>
-                  <th class="p-2">Cliente</th>
-                  <th class="p-2">Cajero</th>
-                  <th class="p-2 text-right">Monto</th>
-                </tr>
-              </thead>
-              <tbody id="close-shift-abonos-list" class="divide-y divide-slate-100 font-medium">
-                <tr><td colspan="4" class="p-3 text-center text-slate-400">Sin abonos en este turno.</td></tr>
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
 
