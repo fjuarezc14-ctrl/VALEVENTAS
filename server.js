@@ -247,15 +247,18 @@ app.put('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-// REABASTECIMIENTO DE STOCK DE PRODUCTO CON GUÍA DE REMISIÓN / FACTURA
+// REABASTECIMIENTO DE STOCK DE PRODUCTO CON GUÍA DE REMISIÓN / FACTURA / MERMA / CORTESÍA
 app.post('/api/products/:id/stock', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price } = req.body;
+  const { quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price, movement_type } = req.body;
   const qty = parseInt(quantity);
 
   if (isNaN(qty) || qty <= 0) {
     return res.status(400).json({ error: 'La cantidad a ingresar debe ser un número entero mayor a 0.' });
   }
+
+  const typeFinal = (movement_type || 'INGRESO').toUpperCase();
+  const isDecrease = ['MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(typeFinal);
 
   const client = await db.pool.connect();
   try {
@@ -269,7 +272,7 @@ app.post('/api/products/:id/stock', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Producto no encontrado.' });
     }
 
-    const updatedStock = product.stock + qty;
+    const updatedStock = isDecrease ? Math.max(0, product.stock - qty) : (product.stock + qty);
     const updateFields = ['stock = $1'];
     const updateParams = [updatedStock];
     let paramIdx = 2;
@@ -286,48 +289,58 @@ app.post('/api/products/:id/stock', authMiddleware, async (req, res) => {
     }
 
     updateParams.push(id);
-    await client.query(`UPDATE products SET ${updateFields.join(', ')} WHERE id = $${paramIdx - 1}`, updateParams);
+    await client.query(`UPDATE products SET ${updateFields.join(', ')} WHERE id = $${updateParams.length}`, updateParams);
 
-    const docTypeFinal = doc_type || 'Guía de Remisión';
+    const docTypeFinal = doc_type || (isDecrease ? 'Sustento Interno' : 'Guía de Remisión');
     const docNumFinal = doc_number ? doc_number.trim() : '';
     const notesFinal = supplier_notes ? supplier_notes.trim() : '';
 
     await client.query(`
       INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
-      VALUES ($1, $2, $3, 'INGRESO', $4, $5, $6, $7, $8)
-    `, [id, product.name, qty, docTypeFinal, docNumFinal, notesFinal, req.user.id, req.user.name]);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `, [id, product.name, qty, typeFinal, docTypeFinal, docNumFinal, notesFinal, req.user.id, req.user.name]);
 
     await client.query('COMMIT');
 
     io.emit('products_changed');
 
+    const actionText = isDecrease ? `disminuido en -${qty} unds.` : `incrementado en +${qty} unds.`;
     res.json({
       success: true,
-      message: `Stock de "${product.name}" incrementado en +${qty} unds. (Total en stock: ${updatedStock})`,
+      message: `Stock de "${product.name}" ${actionText} (Total en stock: ${updatedStock})`,
       newStock: updatedStock
     });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('❌ Error registrando ingreso de stock:', err.message);
-    res.status(500).json({ error: 'Error al ingresar stock de producto.' });
+    console.error('❌ Error registrando movimiento de stock:', err.message);
+    res.status(500).json({ error: 'Error al registrar movimiento de stock: ' + err.message });
   } finally {
     client.release();
   }
 });
 
 app.get('/api/inventory/movements', authMiddleware, async (req, res) => {
+  const { type } = req.query;
   try {
+    let whereClause = '';
+    const params = [];
+    if (type && type !== 'Todos') {
+      whereClause = 'WHERE sm.type = $1';
+      params.push(type);
+    }
+
     const result = await db.query(`
       SELECT 
         sm.id, sm.product_id, sm.product_name, sm.quantity, sm.type, sm.doc_type, sm.doc_number, sm.supplier_notes, sm.user_id, COALESCE(sm.user_name, 'Sistema') AS user_name, sm.created_at
       FROM stock_movements sm
+      ${whereClause}
       ORDER BY sm.id DESC
-      LIMIT 200
-    `);
+      LIMIT 300
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Error obteniendo movimientos de inventario:', err.message);
-    res.status(500).json({ error: 'Error al consultar ingresos de stock.' });
+    res.status(500).json({ error: 'Error al consultar movimientos de stock.' });
   }
 });
 
@@ -847,11 +860,19 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: '⚠️ No hay ninguna caja abierta en este turno. Debe abrir la caja antes de procesar ventas.' });
     }
 
+    if (payment_method === 'Fiado' && (!customer_id || parseInt(customer_id) <= 0)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: '⚠️ Para registrar una venta a FIADO es obligatorio seleccionar un cliente registrado.' });
+    }
+
     let total = 0;
     items.forEach(i => { total += i.quantity * i.unit_price; });
 
     const subtotal = total / 1.18;
     const tax = total - subtotal;
+
+    const mixedCashAmt = payment_method === 'Pago Mixto' ? (parseFloat(req.body.mixed_cash) || 0) : 0;
+    const mixedOtherAmt = payment_method === 'Pago Mixto' ? (parseFloat(req.body.mixed_other) || (total - mixedCashAmt)) : 0;
 
     // 1. Validar Stock
     const productIds = items.filter(i => i.product_id).map(i => i.product_id);
@@ -881,10 +902,10 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
     const sellerName = req.user.name;
 
     const saleInsertRes = await client.query(`
-      INSERT INTO sales (receipt_code, doc_type, customer_id, customer_name, payment_method, subtotal, tax, total, paid_amount, change_amount, user_id, user_name, cash_register_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      INSERT INTO sales (receipt_code, doc_type, customer_id, customer_name, payment_method, subtotal, tax, total, paid_amount, change_amount, user_id, user_name, cash_register_id, mixed_cash, mixed_other)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING id
-    `, [receipt_code, doc_type || 'Ticket', customer_id || null, customer_name || 'Público General', payment_method, subtotal, tax, total, paid_amount || total, change_amount || 0, sellerId, sellerName, activeRegister.id]);
+    `, [receipt_code, doc_type || 'Ticket', customer_id || null, customer_name || 'Público General', payment_method, subtotal, tax, total, paid_amount || total, change_amount || 0, sellerId, sellerName, activeRegister.id, mixedCashAmt, mixedOtherAmt]);
 
     const saleId = saleInsertRes.rows[0].id;
 
@@ -909,9 +930,9 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
       await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [customer_id, newDebt]);
       await client.query(`
-        INSERT INTO fiado_payments (customer_id, type, amount, details, balance_after)
-        VALUES ($1, 'COMPRA_FIADA', $2, $3, $4)
-      `, [customer_id, total, details, newDebt]);
+        INSERT INTO fiado_payments (customer_id, user_id, user_name, type, payment_method, amount, details, balance_after)
+        VALUES ($1, $2, $3, 'COMPRA_FIADA', 'Fiado', $4, $5, $6)
+      `, [customer_id, sellerId, sellerName, total, details, newDebt]);
     }
 
     // 6. Acumular venta en la caja abierta del turno
@@ -921,6 +942,8 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
       await client.query("UPDATE cash_registers SET card_sales = card_sales + $1 WHERE id = $2", [total, activeRegister.id]);
     } else if (payment_method === 'Yape/Plin') {
       await client.query("UPDATE cash_registers SET transfer_sales = transfer_sales + $1 WHERE id = $2", [total, activeRegister.id]);
+    } else if (payment_method === 'Pago Mixto') {
+      await client.query("UPDATE cash_registers SET cash_sales = cash_sales + $1, transfer_sales = transfer_sales + $2 WHERE id = $3", [mixedCashAmt, mixedOtherAmt, activeRegister.id]);
     } else if (payment_method === 'Fiado') {
       await client.query("UPDATE cash_registers SET fiado_sales = fiado_sales + $1 WHERE id = $2", [total, activeRegister.id]);
     }
@@ -938,7 +961,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('❌ Error procesando venta:', err.message);
-    res.status(500).json({ error: 'Error procesando la venta.' });
+    res.status(500).json({ error: 'Error procesando la venta: ' + err.message });
   } finally {
     client.release();
   }
@@ -951,7 +974,7 @@ app.get('/api/fiados/:customerId', async (req, res) => {
   const { customerId } = req.params;
   try {
     const result = await db.query(`
-      SELECT id, customer_id, type, amount::float AS amount, balance_after::float AS balance_after, details, created_at 
+      SELECT id, customer_id, type, COALESCE(payment_method, 'Efectivo') AS payment_method, amount::float AS amount, balance_after::float AS balance_after, details, created_at 
       FROM fiado_payments WHERE customer_id = $1 ORDER BY id DESC
     `, [customerId]);
     res.json(result.rows);
@@ -962,8 +985,9 @@ app.get('/api/fiados/:customerId', async (req, res) => {
 });
 
 app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
-  const { customer_id, amount } = req.body;
+  const { customer_id, amount, payment_method } = req.body;
   const abonoAmt = parseFloat(amount);
+  const payMethod = payment_method || 'Efectivo';
 
   if (!customer_id || isNaN(abonoAmt) || abonoAmt <= 0) {
     return res.status(400).json({ error: 'Monto de abono válido es requerido.' });
@@ -985,11 +1009,19 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
     await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, customer_id]);
 
     await client.query(`
-      INSERT INTO fiado_payments (customer_id, user_id, user_name, type, amount, details, balance_after)
-      VALUES ($1, $2, $3, 'ABONO', $4, 'Abono / Pago en efectivo', $5)
-    `, [customer_id, req.user.id, req.user.name, abonoAmt, newDebt]);
+      INSERT INTO fiado_payments (customer_id, user_id, user_name, type, payment_method, amount, details, balance_after)
+      VALUES ($1, $2, $3, 'ABONO', $4, $5, $6, $7)
+    `, [customer_id, req.user.id, req.user.name, payMethod, abonoAmt, `Abono / Pago en ${payMethod}`, newDebt]);
 
-    await client.query("UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, cash_sales = cash_sales + $1 WHERE status = 'abierta'", [abonoAmt]);
+    let updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1 WHERE status = 'abierta'";
+    if (payMethod === 'Efectivo') {
+      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, cash_sales = cash_sales + $1 WHERE status = 'abierta'";
+    } else if (payMethod === 'Tarjeta') {
+      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, card_sales = card_sales + $1 WHERE status = 'abierta'";
+    } else if (payMethod === 'Yape/Plin') {
+      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, transfer_sales = transfer_sales + $1 WHERE status = 'abierta'";
+    }
+    await client.query(updateCashSql, [abonoAmt]);
 
     await client.query('COMMIT');
 
@@ -999,11 +1031,12 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
     const abonoCode = `AB-${String(Date.now()).slice(-6)}`;
     res.json({
       success: true,
-      message: `Abono de S/ ${abonoAmt.toFixed(2)} registrado correctamente por ${req.user.name}`,
+      message: `Abono de S/ ${abonoAmt.toFixed(2)} (${payMethod}) registrado correctamente por ${req.user.name}`,
       receipt_code: abonoCode,
       customer_name: customer.name,
       user_name: req.user.name,
       amount: abonoAmt,
+      payment_method: payMethod,
       newDebt
     });
 
@@ -1021,7 +1054,7 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
 // ==========================================
 app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const result = await db.query('SELECT id, username, name, role, created_at FROM users ORDER BY id ASC');
+    const result = await db.query('SELECT id, username, name, role, plain_password, created_at FROM users ORDER BY id ASC');
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Error obteniendo usuarios:', err.message);
@@ -1037,12 +1070,13 @@ app.post('/api/users', authMiddleware, adminOnly, async (req, res) => {
 
   try {
     const passHash = bcrypt.hashSync(password.trim(), 10);
+    const plainPass = password.trim();
     const query = `
-      INSERT INTO users (username, password, name, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, username, name, role, created_at
+      INSERT INTO users (username, password, plain_password, name, role)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, username, name, role, plain_password, created_at
     `;
-    const result = await db.query(query, [username.trim(), passHash, name.trim(), role]);
+    const result = await db.query(query, [username.trim(), passHash, plainPass, name.trim(), role]);
     res.json({ success: true, user: result.rows[0] });
   } catch (err) {
     console.error('❌ Error creando usuario:', err.message);
@@ -1060,7 +1094,8 @@ app.put('/api/users/:id/password', authMiddleware, adminOnly, async (req, res) =
 
   try {
     const passHash = bcrypt.hashSync(newPassword.trim(), 10);
-    await db.query('UPDATE users SET password = $1 WHERE id = $2', [passHash, id]);
+    const plainPass = newPassword.trim();
+    await db.query('UPDATE users SET password = $1, plain_password = $2 WHERE id = $3', [passHash, plainPass, id]);
     res.json({ success: true, message: 'Contraseña actualizada correctamente' });
   } catch (err) {
     console.error('❌ Error actualizando contraseña:', err.message);

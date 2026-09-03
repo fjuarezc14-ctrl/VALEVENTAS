@@ -184,6 +184,30 @@ function focusSearchInput() {
   }, 100);
 }
 
+// ==========================================
+// CONTROL DE RESPONSIVIDAD MÓVIL Y MENU DRAWER
+// ==========================================
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById('main-sidebar');
+  const backdrop = document.getElementById('mobile-sidebar-backdrop');
+  if (!sidebar) return;
+  const isClosed = sidebar.classList.contains('-translate-x-full');
+  if (isClosed) {
+    sidebar.classList.remove('-translate-x-full');
+    if (backdrop) backdrop.classList.remove('hidden');
+  } else {
+    sidebar.classList.add('-translate-x-full');
+    if (backdrop) backdrop.classList.add('hidden');
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById('main-sidebar');
+  const backdrop = document.getElementById('mobile-sidebar-backdrop');
+  if (sidebar) sidebar.classList.add('-translate-x-full');
+  if (backdrop) backdrop.classList.add('hidden');
+}
+
 function switchTab(tabId) {
   // Validación de seguridad para navegación por tabs
   if (tabId === 'users' && (!currentUser || currentUser.role !== 'Admin')) {
@@ -191,6 +215,20 @@ function switchTab(tabId) {
     switchTab('pos');
     return;
   }
+
+  const tabTitles = {
+    dashboard: 'Dashboard',
+    pos: 'Punto Venta',
+    inventory: 'Inventario',
+    crm: 'Clientes',
+    fiados: 'Fiados',
+    reports: 'Reportes',
+    users: 'Usuarios'
+  };
+  const titleEl = document.getElementById('mobile-current-tab-title');
+  if (titleEl && tabTitles[tabId]) titleEl.innerText = tabTitles[tabId];
+
+  closeMobileSidebar();
 
   document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
   
@@ -210,7 +248,9 @@ function switchTab(tabId) {
   if (tabId === 'dashboard') loadDashboard();
   if (tabId === 'inventory') renderInventoryTable();
   if (tabId === 'crm') renderCRMTable();
-  if (tabId === 'fiados') renderFiadosTable();
+  if (tabId === 'fiados') {
+    loadCustomers().then(() => renderFiadosTable());
+  }
   if (tabId === 'reports') loadSalesHistory();
   if (tabId === 'users') loadUsers();
 }
@@ -647,11 +687,23 @@ function exportSalesToCSV() {
     return;
   }
 
-  const headers = ['N° Comprobante', 'Fecha', 'Cliente', 'Vendedor', 'Tipo Comprobante', 'Método Pago', 'Total (S/)', 'Ganancia (S/)', 'Estado'];
+  let totalMonto = 0;
+  let totalGanancia = 0;
+  currentReportSales.forEach(s => {
+    totalMonto += s.total || 0;
+    totalGanancia += s.profit || 0;
+  });
+
+  const summaryHeader = ['REPORTE EJECUTIVO DE VENTAS - SISTEMA VALE-VENTAS POS'];
+  const dateStr = `Fecha de Generación: ${new Date().toLocaleString()}`;
+  const totalStr = `Ventas Totales: S/ ${totalMonto.toFixed(2)} | Ganancia Neta: S/ ${totalGanancia.toFixed(2)} | N° Transacciones: ${currentReportSales.length}`;
+
+  const headers = ['N° Comprobante', 'Fecha / Hora', 'Cliente', 'DNI/RUC', 'Vendedor / Cajero', 'Tipo Comprobante', 'Método Pago', 'Monto Total (S/)', 'Ganancia Neta (S/)', 'Estado'];
   const rows = currentReportSales.map(s => [
     `"${s.receipt_code}"`,
     `"${new Date(s.created_at).toLocaleString()}"`,
-    `"${s.customer_name}"`,
+    `"${s.customer_name || 'Público General'}"`,
+    `"${s.customer_doc || '-'}"`,
     `"${s.user_name || 'Sistema'}"`,
     `"${s.doc_type}"`,
     `"${s.payment_method}"`,
@@ -660,7 +712,15 @@ function exportSalesToCSV() {
     `"${s.status}"`
   ]);
 
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const csvContent = '\uFEFF' + [
+    summaryHeader.join(','),
+    `"${dateStr}"`,
+    `"${totalStr}"`,
+    '',
+    headers.join(','),
+    ...rows.map(r => r.join(','))
+  ].join('\n');
+
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   
@@ -727,21 +787,21 @@ function renderProducts() {
   grid.innerHTML = filtered.map(p => {
     const isLowStock = p.stock <= (p.min_stock || 5);
     return `
-      <div onclick="addToCart(${p.id})" class="bg-white p-4 rounded-2xl border ${isLowStock ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'} shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group relative">
+      <div onclick="addToCart(${p.id})" class="bg-white p-3 sm:p-4 rounded-2xl border ${isLowStock ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'} shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group relative">
         ${isLowStock ? `<span class="absolute -top-2 -right-2 bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">Bajo Stock</span>` : ''}
         <div>
-          <div class="flex justify-between items-start mb-2">
-            <span class="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-md truncate max-w-[100px]">${p.category}</span>
-            <span class="text-[10px] font-mono text-slate-400">#${p.code}</span>
+          <div class="flex justify-between items-start mb-1.5 sm:mb-2">
+            <span class="bg-slate-100 text-slate-600 text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md truncate max-w-[80px] sm:max-w-[100px]">${p.category}</span>
+            <span class="text-[9px] sm:text-[10px] font-mono text-slate-400">#${p.code}</span>
           </div>
-          <h3 class="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors line-clamp-2">${p.name}</h3>
+          <h3 class="font-bold text-slate-800 text-xs sm:text-sm group-hover:text-blue-600 transition-colors line-clamp-2 leading-snug">${p.name}</h3>
         </div>
-        <div class="mt-4 flex justify-between items-end pt-2 border-t border-slate-100">
+        <div class="mt-2.5 sm:mt-4 flex justify-between items-end pt-2 border-t border-slate-100">
           <div>
-            <p class="text-[10px] ${isLowStock ? 'text-rose-600 font-black' : 'text-slate-400 font-bold'} uppercase">Stock: ${p.stock}</p>
-            <p class="text-base font-black text-blue-600">S/ ${p.price.toFixed(2)}</p>
+            <p class="text-[9px] sm:text-[10px] ${isLowStock ? 'text-rose-600 font-black' : 'text-slate-400 font-bold'} uppercase">Stock: ${p.stock}</p>
+            <p class="text-sm sm:text-base font-black text-blue-600">S/ ${p.price.toFixed(2)}</p>
           </div>
-          <button class="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-bold group-hover:bg-blue-600 group-hover:text-white transition-all">
+          <button class="w-7 h-7 sm:w-8 sm:h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-bold group-hover:bg-blue-600 group-hover:text-white transition-all text-xs sm:text-sm">
             <i class="fa-solid fa-plus"></i>
           </button>
         </div>
@@ -913,6 +973,101 @@ function populateCustomerDropdown() {
 
   if (select) select.innerHTML = optionsHTML;
   if (editSelect) editSelect.innerHTML = optionsHTML;
+
+  renderCustomerSearchResults();
+}
+
+// ==========================================
+// BUSCADOR INTERACTIVO DE CLIENTES EN POS
+// ==========================================
+function filterCustomerSearchResults() {
+  const query = (document.getElementById('cust-search-input')?.value || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('btn-clear-cust-search');
+  if (clearBtn) clearBtn.classList.toggle('hidden', query.length === 0);
+
+  renderCustomerSearchResults(query);
+  showCustomerSearchResults();
+}
+
+function showCustomerSearchResults() {
+  const query = (document.getElementById('cust-search-input')?.value || '').toLowerCase().trim();
+  renderCustomerSearchResults(query);
+  const container = document.getElementById('cust-search-results');
+  if (container) container.classList.remove('hidden');
+}
+
+function renderCustomerSearchResults(query = '') {
+  const container = document.getElementById('cust-search-results');
+  if (!container) return;
+
+  const filtered = CLIENTS.filter(c => 
+    c.name.toLowerCase().includes(query) || (c.doc && c.doc.toLowerCase().includes(query))
+  );
+
+  let html = `
+    <div onclick="selectCustomerFromSearch('')" class="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center transition-colors">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-users text-slate-400"></i>
+        <span class="font-bold text-xs text-slate-800">Público General</span>
+      </div>
+      <span class="text-[10px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded">Predeterminado</span>
+    </div>
+  `;
+
+  if (filtered.length === 0 && query.length > 0) {
+    html += `
+      <div class="p-3 text-center text-slate-400 text-xs font-semibold">
+        No se encontró ningún cliente con "${query}".
+        <button type="button" onclick="openCustomerModal()" class="block mx-auto mt-1 text-blue-600 font-bold hover:underline">
+          <i class="fa-solid fa-plus-circle mr-1"></i>+ Registrar como Nuevo Cliente
+        </button>
+      </div>
+    `;
+  } else {
+    html += filtered.map(c => `
+      <div onclick="selectCustomerFromSearch(${c.id})" class="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center transition-colors">
+        <div>
+          <p class="font-bold text-xs text-slate-800">${c.name}</p>
+          <p class="text-[10px] text-slate-400 font-mono">DNI/RUC: ${c.doc || 'Sin Doc'}</p>
+        </div>
+        ${c.debt > 0 ? `<span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded">Deuda: S/ ${c.debt.toFixed(2)}</span>` : '<span class="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded">Sin Deuda</span>'}
+      </div>
+    `).join('');
+  }
+
+  container.innerHTML = html;
+}
+
+function selectCustomerFromSearch(customerId) {
+  const select = document.getElementById('modal-select-customer');
+  if (select) select.value = customerId ? String(customerId) : '';
+
+  const customerObj = CLIENTS.find(c => String(c.id) === String(customerId));
+  const badge = document.getElementById('cust-selected-badge');
+  const badgeText = document.getElementById('cust-selected-text');
+  const searchInput = document.getElementById('cust-search-input');
+  const clearBtn = document.getElementById('btn-clear-cust-search');
+
+  if (customerObj) {
+    if (badgeText) badgeText.innerText = `${customerObj.name} (DNI/RUC: ${customerObj.doc}) ${customerObj.debt > 0 ? ' - Deuda: S/ ' + customerObj.debt.toFixed(2) : ''}`;
+    if (badge) badge.classList.remove('hidden');
+    if (searchInput) searchInput.value = customerObj.name;
+    if (clearBtn) clearBtn.classList.remove('hidden');
+  } else {
+    if (badgeText) badgeText.innerText = 'Público General';
+    if (badge) badge.classList.add('hidden');
+    if (searchInput) searchInput.value = '';
+    if (clearBtn) clearBtn.classList.add('hidden');
+  }
+
+  const container = document.getElementById('cust-search-results');
+  if (container) container.classList.add('hidden');
+
+  onPaymentCustomerChange();
+}
+
+function clearCustomerSearch() {
+  selectCustomerFromSearch('');
 }
 
 function openPaymentModal() {
@@ -981,20 +1136,40 @@ function onPaymentCustomerChange() {
 function selectPaymentMethod(method) {
   selectedPaymentMethod = method;
   document.querySelectorAll('.pay-method-btn').forEach(b => {
-    b.className = 'pay-method-btn bg-slate-50 border border-slate-200 text-slate-600 font-bold p-2.5 rounded-xl text-xs flex flex-col items-center gap-1 hover:bg-slate-100';
+    b.className = 'pay-method-btn bg-slate-50 border border-slate-200 text-slate-600 font-bold p-2 sm:p-2.5 rounded-xl text-[11px] sm:text-xs flex flex-col items-center gap-1 hover:bg-slate-100';
   });
 
   const btnMap = {
     'Efectivo': 'pay-cash',
     'Tarjeta': 'pay-card',
     'Yape/Plin': 'pay-transfer',
+    'Pago Mixto': 'pay-mixed',
     'Fiado': 'pay-fiado'
   };
 
   const selectedBtn = document.getElementById(btnMap[method]);
   if (selectedBtn) {
-    selectedBtn.className = 'pay-method-btn active bg-blue-50 border-2 border-blue-500 text-blue-900 font-bold p-2.5 rounded-xl text-xs flex flex-col items-center gap-1 shadow-sm';
+    selectedBtn.className = 'pay-method-btn active bg-blue-50 border-2 border-blue-500 text-blue-900 font-bold p-2 sm:p-2.5 rounded-xl text-[11px] sm:text-xs flex flex-col items-center gap-1 shadow-sm';
   }
+
+  const mixedBox = document.getElementById('mixed-payment-box');
+  if (mixedBox) mixedBox.classList.toggle('hidden', method !== 'Pago Mixto');
+
+  if (method === 'Pago Mixto') {
+    let total = CART.reduce((sum, i) => sum + (i.product.price * i.quantity), 0);
+    const half = (total / 2).toFixed(2);
+    const cashInput = document.getElementById('mixed-cash-input');
+    if (cashInput) cashInput.value = half;
+    calculateMixedSplit();
+  }
+}
+
+function calculateMixedSplit() {
+  let total = CART.reduce((sum, i) => sum + (i.product.price * i.quantity), 0);
+  const mixedCash = parseFloat(document.getElementById('mixed-cash-input')?.value) || 0;
+  const mixedOther = Math.max(0, total - mixedCash);
+  const otherInput = document.getElementById('mixed-other-input');
+  if (otherInput) otherInput.value = mixedOther.toFixed(2);
 }
 
 function setQuickCash(amount) {
@@ -1070,6 +1245,7 @@ async function processFinalSale() {
           customerId = String(newCust.id);
           customerName = newCust.name;
           await loadCustomers();
+          selectCustomerFromSearch(newCust.id);
         } else {
           throw new Error(newCust.error || 'Error al auto-registrar el cliente');
         }
@@ -1085,8 +1261,11 @@ async function processFinalSale() {
   const paidAmount = parseFloat(document.getElementById('input-paid-amount').value) || total;
   const changeAmount = paidAmount > total ? paidAmount - total : 0;
 
+  const mixedCash = selectedPaymentMethod === 'Pago Mixto' ? (parseFloat(document.getElementById('mixed-cash-input')?.value) || 0) : 0;
+  const mixedOther = selectedPaymentMethod === 'Pago Mixto' ? Math.max(0, total - mixedCash) : 0;
+
   // Confirmación previa al cobro
-  const confirmMsg = `¿Confirmar cobro por S/ ${total.toFixed(2)}?\n\n- Comprobante: ${selectedDocType}\n- Método: ${selectedPaymentMethod}\n- Cliente: ${customerName}`;
+  const confirmMsg = `¿Confirmar cobro por S/ ${total.toFixed(2)}?\n\n- Comprobante: ${selectedDocType}\n- Método: ${selectedPaymentMethod}${selectedPaymentMethod === 'Pago Mixto' ? ` (S/ ${mixedCash.toFixed(2)} Efec. + S/ ${mixedOther.toFixed(2)} Yape/Tarj)` : ''}\n- Cliente: ${customerName}`;
   if (!confirm(confirmMsg)) return;
 
   const payload = {
@@ -1096,6 +1275,8 @@ async function processFinalSale() {
     payment_method: selectedPaymentMethod,
     paid_amount: paidAmount,
     change_amount: changeAmount,
+    mixed_cash: mixedCash,
+    mixed_other: mixedOther,
     items: CART.map(i => ({
       product_id: i.product.id,
       product_name: i.product.name,
@@ -1226,15 +1407,16 @@ async function saveStockIntake(e) {
   const new_purchase_price = document.getElementById('stock-intake-new-purchase').value;
   const new_price = document.getElementById('stock-intake-new-price').value;
   const supplier_notes = document.getElementById('stock-intake-notes').value.trim();
+  const movement_type = document.getElementById('stock-intake-movement-type')?.value || 'INGRESO';
 
   try {
     const res = await fetch(`/api/products/${prodId}/stock`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price })
+      body: JSON.stringify({ quantity, doc_type, doc_number, supplier_notes, new_purchase_price, new_price, movement_type })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error registrando ingreso de stock');
+    if (!res.ok) throw new Error(data.error || 'Error registrando movimiento de stock');
 
     closeStockIntakeModal();
     await loadProducts();
@@ -1244,6 +1426,56 @@ async function saveStockIntake(e) {
   } catch (err) {
     playBeep('error');
     alert('❌ Error: ' + err.message);
+  }
+}
+
+function openKardexModal() {
+  document.getElementById('modal-kardex').classList.remove('hidden');
+  loadKardexMovements();
+}
+
+function closeKardexModal() {
+  document.getElementById('modal-kardex').classList.add('hidden');
+}
+
+async function loadKardexMovements() {
+  const typeFilter = document.getElementById('kardex-type-filter')?.value || 'Todos';
+  const tbody = document.getElementById('kardex-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400 font-bold">Cargando kardex...</td></tr>`;
+
+  try {
+    const res = await fetch(`/api/inventory/movements?type=${encodeURIComponent(typeFilter)}`, { headers: getAuthHeaders() });
+    const records = await res.json();
+
+    if (!res.ok) throw new Error(records.error || 'Error consultando kardex');
+
+    if (records.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">Sin movimientos registrados para el filtro seleccionado.</td></tr>`;
+      return;
+    }
+
+    const typeBadgeMap = {
+      'INGRESO': '<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px]">🟢 INGRESO (+)</span>',
+      'MERMA': '<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold text-[10px]">🔴 MERMA (-)</span>',
+      'CORTESIA': '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold text-[10px]">🔵 CORTESÍA (-)</span>',
+      'SALIDA_INTERNA': '<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold text-[10px]">🟠 SALIDA INTERNA (-)</span>'
+    };
+
+    tbody.innerHTML = records.map(r => `
+      <tr class="hover:bg-slate-50">
+        <td class="p-3 text-slate-400 text-xs font-mono">${new Date(r.created_at).toLocaleString()}</td>
+        <td class="p-3">${typeBadgeMap[r.type] || `<span class="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold text-[10px]">${r.type}</span>`}</td>
+        <td class="p-3 font-bold text-slate-800">${r.product_name}</td>
+        <td class="p-3 text-center font-black ${['MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(r.type) ? 'text-rose-600' : 'text-emerald-600'}">${['MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(r.type) ? '-' : '+'}${r.quantity} unds</td>
+        <td class="p-3 text-slate-600 font-medium">${r.doc_type} ${r.doc_number ? '<span class="font-mono text-xs font-bold text-slate-700">#' + r.doc_number + '</span>' : ''}</td>
+        <td class="p-3 text-slate-700 font-bold"><i class="fa-solid fa-user-tag text-blue-500 mr-1"></i>${r.user_name}</td>
+        <td class="p-3 text-slate-500 text-xs">${r.supplier_notes || '-'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-rose-500 font-bold">Error cargando kardex: ${err.message}</td></tr>`;
   }
 }
 
@@ -1385,12 +1617,16 @@ async function saveCustomer(e) {
       headers: getAuthHeaders(),
       body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Error al registrar cliente');
+    const newCust = await res.json();
+    if (!res.ok) throw new Error(newCust.error || 'Error al registrar cliente');
 
     closeCustomerModal();
     await loadCustomers();
+    if (newCust.id) {
+      selectCustomerFromSearch(newCust.id);
+    }
     playBeep('success');
-    alert('✅ Cliente registrado con éxito.');
+    alert('✅ Cliente registrado con éxito y añadido a la cartera.');
   } catch (err) {
     playBeep('error');
     alert('❌ Error: ' + err.message);
@@ -1417,7 +1653,7 @@ async function openFiadoModal(customerId) {
         <tr class="hover:bg-slate-50">
           <td class="p-3 text-slate-400 text-[11px]">${new Date(r.created_at).toLocaleString()}</td>
           <td class="p-3"><span class="${r.type === 'ABONO' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'} px-2 py-0.5 rounded font-bold text-[10px]">${r.type}</span></td>
-          <td class="p-3 text-slate-700">${r.details || '-'}</td>
+          <td class="p-3 text-slate-700">${r.details || '-'} (${r.payment_method || 'Efectivo'})</td>
           <td class="p-3 text-right font-bold ${r.type === 'ABONO' ? 'text-emerald-600' : 'text-slate-800'}">S/ ${r.amount.toFixed(2)}</td>
           <td class="p-3 text-right font-black text-slate-900">S/ ${r.balance_after.toFixed(2)}</td>
         </tr>
@@ -1438,6 +1674,8 @@ function closeFiadoModal() {
 async function processAbono() {
   if (!currentActiveCustomerForFiado) return;
   const amount = parseFloat(document.getElementById('input-abono-amount').value);
+  const payment_method = document.getElementById('select-abono-method')?.value || 'Efectivo';
+
   if (!amount || amount <= 0) {
     alert('⚠️ Ingrese un monto de abono válido.');
     return;
@@ -1447,13 +1685,15 @@ async function processAbono() {
     const res = await fetch('/api/fiados/abono', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ customer_id: currentActiveCustomerForFiado.id, amount })
+      body: JSON.stringify({ customer_id: currentActiveCustomerForFiado.id, amount, payment_method })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error registrando abono');
 
     playBeep('success');
     closeFiadoModal();
+    await loadCustomers();
+    await loadCurrentCashRegister();
 
     // Renderizar Recibo Térmico de Abono
     document.getElementById('rec-title').innerText = 'COMPROBANTE DE ABONO DE DEUDA';
@@ -1461,9 +1701,27 @@ async function processAbono() {
     document.getElementById('rec-customer').innerText = 'Cliente: ' + (data.customer_name || currentActiveCustomerForFiado.name);
     document.getElementById('rec-date').innerText = new Date().toLocaleString();
     document.getElementById('rec-total').innerText = `S/ ${amount.toFixed(2)}`;
-    document.getElementById('rec-method').innerText = 'Abono en Efectivo';
+    document.getElementById('rec-method').innerText = `Abono en ${payment_method}`;
     document.getElementById('rec-paid').innerText = `S/ ${amount.toFixed(2)}`;
     document.getElementById('rec-change').innerText = `S/ ${(data.newDebt || 0).toFixed(2)}`;
+
+    document.getElementById('rec-items').innerHTML = `
+      <div class="flex justify-between items-start font-bold">
+        <span>ABONO DE DEUDA (${payment_method})</span>
+        <span>S/ ${amount.toFixed(2)}</span>
+      </div>
+      <div class="flex justify-between items-start text-slate-500 text-[10px]">
+        <span>Saldo Pendiente Actual:</span>
+        <span>S/ ${(data.newDebt || 0).toFixed(2)}</span>
+      </div>
+    `;
+
+    document.getElementById('modal-receipt').classList.remove('hidden');
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
+}
 
     document.getElementById('rec-items').innerHTML = `
       <div class="py-2 space-y-1">
@@ -1652,23 +1910,69 @@ async function anularVenta(saleId) {
 // ==========================================
 // 5. GESTIÓN DE USUARIOS Y ROLES (ADMIN ONLY)
 // ==========================================
+// ==========================================
+// 5. GESTIÓN DE USUARIOS Y ROLES (ADMIN ONLY)
+// ==========================================
 function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-body');
   if (!tbody) return;
 
-  tbody.innerHTML = users.map(u => `
-    <tr class="hover:bg-slate-50">
-      <td class="p-4 font-mono font-bold text-slate-800">${u.username}</td>
-      <td class="p-4 text-slate-700">${u.name}</td>
-      <td class="p-4"><span class="${u.role === 'Admin' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'} px-2.5 py-1 rounded text-xs font-bold">${u.role}</span></td>
-      <td class="p-4 text-center"><span class="text-emerald-600 bg-emerald-100 px-2 py-1 rounded text-xs font-bold">Activo</span></td>
-      <td class="p-4 text-center space-x-2">
-        <button onclick="openPasswordModal(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-800 font-bold text-xs bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-          <i class="fa-solid fa-key mr-1"></i>Cambiar Clave
-        </button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = users.map(u => {
+    const plain = u.plain_password || (u.username === 'admin' ? 'admin123' : u.username === 'cajero' ? 'cajero123' : '••••••••');
+    const safePlain = plain.replace(/'/g, "\\'");
+    return `
+      <tr class="hover:bg-slate-50">
+        <td class="p-3 sm:p-4 font-mono font-bold text-slate-800">${u.username}</td>
+        <td class="p-3 sm:p-4 text-slate-700 font-medium">${u.name}</td>
+        <td class="p-3 sm:p-4"><span class="${u.role === 'Admin' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'} px-2.5 py-1 rounded-lg text-xs font-bold">${u.role}</span></td>
+        <td class="p-3 sm:p-4">
+          <div class="flex items-center gap-2">
+            <span id="user-pass-text-${u.id}" class="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">••••••••</span>
+            <button type="button" onclick="toggleUserPasswordVisibility(${u.id}, '${safePlain}')" title="Mostrar / Ocultar Clave" class="text-slate-400 hover:text-blue-600 p-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200 transition-colors">
+              <i id="user-pass-icon-${u.id}" class="fa-solid fa-eye text-xs"></i>
+            </button>
+          </div>
+        </td>
+        <td class="p-3 sm:p-4 text-center"><span class="text-emerald-600 bg-emerald-100 px-2.5 py-1 rounded-lg text-xs font-bold">Activo</span></td>
+        <td class="p-3 sm:p-4 text-center space-x-2">
+          <button onclick="openPasswordModal(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-800 font-bold text-xs bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200 shadow-sm transition-colors">
+            <i class="fa-solid fa-key mr-1"></i>Modificar Clave
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function toggleUserPasswordVisibility(userId, plainPass) {
+  const textEl = document.getElementById(`user-pass-text-${userId}`);
+  const iconEl = document.getElementById(`user-pass-icon-${userId}`);
+  if (!textEl || !iconEl) return;
+
+  const isHidden = textEl.innerText === '••••••••';
+  if (isHidden) {
+    textEl.innerText = plainPass || '(Sin clave)';
+    textEl.classList.add('text-blue-600', 'bg-blue-50', 'border-blue-200');
+    iconEl.className = 'fa-solid fa-eye-slash text-xs text-blue-600';
+  } else {
+    textEl.innerText = '••••••••';
+    textEl.classList.remove('text-blue-600', 'bg-blue-50', 'border-blue-200');
+    iconEl.className = 'fa-solid fa-eye text-xs';
+  }
+}
+
+function toggleInputPasswordVisibility(inputId, iconId) {
+  const inputEl = document.getElementById(inputId);
+  const iconEl = document.getElementById(iconId);
+  if (!inputEl || !iconEl) return;
+
+  if (inputEl.type === 'password') {
+    inputEl.type = 'text';
+    iconEl.className = 'fa-solid fa-eye-slash text-xs text-blue-600';
+  } else {
+    inputEl.type = 'password';
+    iconEl.className = 'fa-solid fa-eye text-xs text-slate-400';
+  }
 }
 
 function openUserModal() {
@@ -1752,6 +2056,7 @@ async function processChangePassword(e) {
     if (!res.ok) throw new Error(data.error || 'Error actualizando contraseña');
 
     closePasswordModal();
+    await loadUsers();
     playBeep('success');
     alert('✅ Contraseña actualizada correctamente.');
   } catch (err) {
@@ -1759,5 +2064,13 @@ async function processChangePassword(e) {
     alert('❌ Error: ' + err.message);
   }
 }
+
+document.addEventListener('click', (e) => {
+  const container = document.getElementById('cust-search-results');
+  const searchInput = document.getElementById('cust-search-input');
+  if (container && searchInput && !container.contains(e.target) && !searchInput.contains(e.target)) {
+    container.classList.add('hidden');
+  }
+});
 
 window.onload = init;
