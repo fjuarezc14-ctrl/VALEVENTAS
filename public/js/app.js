@@ -125,8 +125,8 @@ function updateUserUI() {
 
     const isAdmin = currentUser.role === 'Admin';
 
-    // Aplicar ocultamiento estricto a todos los elementos con clase admin-only
-    document.querySelectorAll('.admin-only').forEach(el => {
+    // Aplicar ocultamiento estricto a todos los elementos con clase admin-only (excepto secciones de vista)
+    document.querySelectorAll('.admin-only:not(.view-section)').forEach(el => {
       if (isAdmin) {
         el.classList.remove('hidden');
       } else {
@@ -275,7 +275,7 @@ function switchTab(tabId) {
   }
 
   // Mantener ocultos de forma permanente y estricta los elementos administrativos para el rol Cajero
-  document.querySelectorAll('.admin-only').forEach(el => {
+  document.querySelectorAll('.admin-only:not(.view-section)').forEach(el => {
     if (isAdmin) {
       el.classList.remove('hidden');
     } else {
