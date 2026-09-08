@@ -44,34 +44,37 @@ async function init() {
   initWebSockets();
 
   const token = localStorage.getItem('valetec-token');
-  if (token) {
-    try {
-      const res = await fetch('/api/auth/me', { headers: getAuthHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        currentUser = data.user;
-        updateUserUI();
-      } else {
-        logout();
-        return;
-      }
-    } catch (err) {
-      console.error('Error autenticando token:', err);
+  if (!token) {
+    logout();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/me', { headers: getAuthHeaders() });
+    if (!res.ok) {
       logout();
       return;
     }
-  } else {
-    openLoginModal();
+    const data = await res.json();
+    currentUser = data.user;
+    updateUserUI();
+    await loadInitialData();
+  } catch (err) {
+    console.error('Error autenticando token:', err);
+    logout();
   }
+}
 
+async function loadInitialData() {
   await loadCompanySettings();
-  await loadDashboard();
   await loadProducts();
   await loadCustomers();
-  await loadSalesHistory();
-  await loadUsers();
   await loadCurrentCashRegister();
-  
+  if (currentUser && currentUser.role === 'Admin') {
+    await loadDashboard();
+    await loadSalesHistory();
+    await loadUsers();
+  }
   focusSearchInput();
 }
 
@@ -181,11 +184,7 @@ async function handleLogin(e) {
     updateUserUI();
     playBeep('success');
 
-    await loadProducts();
-    await loadSalesHistory();
-    await loadCurrentCashRegister();
-    await loadUsers();
-    focusSearchInput();
+    await loadInitialData();
 
   } catch (err) {
     playBeep('error');
@@ -670,8 +669,10 @@ function closeCierreZModal() {
 // API FETCHERS
 // ==========================================
 async function loadDashboard() {
+  if (!currentUser || currentUser.role !== 'Admin') return;
   try {
-    const res = await fetch('/api/dashboard');
+    const res = await fetch('/api/dashboard', { headers: getAuthHeaders() });
+    if (!res.ok) return;
     const data = await res.json();
 
     document.getElementById('dash-sales').innerText = `S/ ${(data.todaySales || 0).toFixed(2)}`;
@@ -694,8 +695,10 @@ async function loadDashboard() {
 
 async function loadProducts() {
   try {
-    const res = await fetch('/api/products');
-    PRODUCTS = await res.json();
+    const res = await fetch('/api/products', { headers: getAuthHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    PRODUCTS = Array.isArray(data) ? data : [];
     renderCategoryFilters();
     renderProducts();
     renderInventoryTable();
@@ -706,8 +709,10 @@ async function loadProducts() {
 
 async function loadCustomers() {
   try {
-    const res = await fetch('/api/customers');
-    CLIENTS = await res.json();
+    const res = await fetch('/api/customers', { headers: getAuthHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    CLIENTS = Array.isArray(data) ? data : [];
     populateCustomerDropdown();
     renderCRMTable();
     renderFiadosTable();
@@ -717,6 +722,7 @@ async function loadCustomers() {
 }
 
 async function loadSalesHistory() {
+  if (!currentUser || currentUser.role !== 'Admin') return;
   const startDate = document.getElementById('rep-start-date')?.value || '';
   const endDate = document.getElementById('rep-end-date')?.value || '';
   const paymentMethod = document.getElementById('rep-payment-method')?.value || 'Todos';
@@ -729,11 +735,13 @@ async function loadSalesHistory() {
   if (searchQuery) url += `&q=${encodeURIComponent(searchQuery)}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: getAuthHeaders() });
+    if (!res.ok) return;
     const data = await res.json();
+    if (!data || !data.summary) return;
     
-    currentReportSales = data.sales || [];
-    currentReportAbonos = data.abonos || [];
+    currentReportSales = Array.isArray(data.sales) ? data.sales : [];
+    currentReportAbonos = Array.isArray(data.abonos) ? data.abonos : [];
 
     document.getElementById('rep-total-sales').innerText = `S/ ${(data.summary.totalSales || 0).toFixed(2)}`;
     document.getElementById('rep-net-profit').innerText = `S/ ${(data.summary.totalProfit || 0).toFixed(2)}`;

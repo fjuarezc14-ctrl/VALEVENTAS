@@ -4,8 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VALE-VENTAS by VALETEC | Sistema POS & Fiados</title>
-  <link rel="stylesheet" href="/css/tailwind.min.css">
-  <link rel="stylesheet" href="/css/all.min.css">
+  <script>
+    (function(){
+      var _warn = console.warn;
+      console.warn = function(){
+        if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].includes('cdn.tailwindcss.com')) return;
+        _warn.apply(console, arguments);
+      };
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -681,7 +690,7 @@
   </main>
 
   <!-- MODAL LOGIN (INICIO DE SESIÓN SEGURA CON TRANSICIÓN FLUIDA) -->
-  <div id="modal-login" class="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex items-center justify-center p-4 transition-all duration-300">
+  <div id="modal-login" style="background-color: rgba(2, 6, 23, 0.98);" class="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex items-center justify-center p-4 transition-all duration-300">
     <div class="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-8 space-y-6 border border-slate-800/20 transform transition-all scale-100">
       <div class="text-center space-y-2">
         <div class="w-16 h-16 bg-blue-600 text-white rounded-2xl flex items-center justify-center text-3xl font-black mx-auto shadow-xl shadow-blue-900/30 animate-pulse">
