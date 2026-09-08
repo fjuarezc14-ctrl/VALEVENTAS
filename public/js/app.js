@@ -1986,12 +1986,18 @@ async function openFiadoModal(customerId) {
   document.getElementById('input-abono-amount').value = '';
 
   try {
-    const res = await fetch(`/api/fiados/${customerId}`);
+    const res = await fetch(`/api/fiados/${customerId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Error al consultar historial de fiados');
+    }
     const records = await res.json();
 
     const historyTbody = document.getElementById('fiado-modal-history');
-    if (records.length === 0) {
-      historyTbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400">Sin historial de fiados ni abonos.</td></tr>`;
+    if (!Array.isArray(records) || records.length === 0) {
+      historyTbody.innerHTML = `<tr><td colspan="${isAdmin ? 6 : 5}" class="p-4 text-center text-slate-400">Sin historial de fiados ni abonos.</td></tr>`;
     } else {
       historyTbody.innerHTML = records.map(r => {
         const isAbono = r.type === 'ABONO';
@@ -2007,13 +2013,15 @@ async function openFiadoModal(customerId) {
           <td class="p-3 text-slate-700">${r.details || '-'} (${r.payment_method || 'Efectivo'})</td>
           <td class="p-3 text-right font-bold ${isAbono ? 'text-emerald-600' : (r.type === 'ANULACION_ABONO' ? 'text-rose-600' : 'text-slate-800')}">S/ ${r.amount.toFixed(2)}</td>
           <td class="p-3 text-right font-black text-slate-900">S/ ${r.balance_after.toFixed(2)}</td>
-          <td class="p-3 text-center admin-only">
-            ${isAdmin && isAbono && !isAnulado ? `
+          ${isAdmin ? `
+          <td class="p-3 text-center">
+            ${isAbono && !isAnulado ? `
               <button onclick="anularAbono(${r.id}, ${customerId})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-2 py-1 rounded text-[10px] transition-colors" title="Anular este abono">
                 <i class="fa-solid fa-trash mr-1"></i>Anular
               </button>
             ` : (isAnulado ? '<span class="text-[10px] font-bold text-slate-400">Anulado</span>' : '-')}
           </td>
+          ` : ''}
         </tr>
       `;
       }).join('');
@@ -2021,7 +2029,8 @@ async function openFiadoModal(customerId) {
 
     document.getElementById('modal-fiado-detail').classList.remove('hidden');
   } catch (err) {
-    alert('❌ Error cargando historial de fiados');
+    console.error('Error cargando historial de fiados:', err);
+    alert('❌ Error cargando historial de fiados: ' + (err.message || ''));
   }
 }
 
