@@ -217,6 +217,14 @@ app.post('/api/products', authMiddleware, adminOnly, async (req, res) => {
       min_stock || 5
     ]);
 
+    // Si el producto se registra con stock inicial > 0, asentar movimiento en Kardex
+    if (parseInt(stock) > 0) {
+      await db.query(`
+        INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
+        VALUES ($1, $2, $3, 'INGRESO_INICIAL', 'Inventario Inicial', $4, 'Stock inicial registrado al crear el producto', $5, $6)
+      `, [result.rows[0].id, name, parseInt(stock), code, req.user?.id || null, req.user?.name || 'Administrador']);
+    }
+
     // Emitir evento de cambio en inventario a todos los POS conectados
     io.emit('products_changed');
 
@@ -889,6 +897,10 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
     for (const item of itemsRes.rows) {
       if (item.product_id) {
         await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [item.quantity, item.product_id]);
+        await client.query(`
+          INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
+          VALUES ($1, $2, $3, 'DEVOLUCION_VENTA', 'Anulación Venta', $4, $5, $6, $7)
+        `, [item.product_id, item.product_name, item.quantity, sale.receipt_code, 'Restauración de stock por anulación de venta #' + id, req.user.id, req.user.name]);
       }
     }
 
@@ -1058,6 +1070,10 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
       if (item.product_id) {
         await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [item.quantity, item.product_id]);
+        await client.query(`
+          INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
+          VALUES ($1, $2, $3, 'VENTA', $4, $5, 'Salida por venta en POS', $6, $7)
+        `, [item.product_id, item.product_name, item.quantity, docTypeFinal, receipt_code, sellerId, sellerName]);
       }
     }
 

@@ -1767,23 +1767,29 @@ async function loadKardexMovements() {
     }
 
     const typeBadgeMap = {
+      'VENTA': '<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold text-[10px]">🛒 VENTA (-)</span>',
       'INGRESO': '<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px]">🟢 INGRESO (+)</span>',
+      'INGRESO_INICIAL': '<span class="bg-teal-100 text-teal-800 px-2 py-0.5 rounded font-bold text-[10px]">📦 INIC. (+)</span>',
+      'DEVOLUCION_VENTA': '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold text-[10px]">↩️ DEVOLUCIÓN (+)</span>',
       'MERMA': '<span class="bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold text-[10px]">🔴 MERMA (-)</span>',
-      'CORTESIA': '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold text-[10px]">🔵 CORTESÍA (-)</span>',
+      'CORTESIA': '<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-bold text-[10px]">🔵 CORTESÍA (-)</span>',
       'SALIDA_INTERNA': '<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold text-[10px]">🟠 SALIDA INTERNA (-)</span>'
     };
 
-    tbody.innerHTML = records.map(r => `
+    tbody.innerHTML = records.map(r => {
+      const isDecrease = ['VENTA', 'MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(r.type);
+      return `
       <tr class="hover:bg-slate-50">
         <td class="p-3 text-slate-400 text-xs font-mono">${new Date(r.created_at).toLocaleString()}</td>
         <td class="p-3">${typeBadgeMap[r.type] || `<span class="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold text-[10px]">${r.type}</span>`}</td>
         <td class="p-3 font-bold text-slate-800">${r.product_name}</td>
-        <td class="p-3 text-center font-black ${['MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(r.type) ? 'text-rose-600' : 'text-emerald-600'}">${['MERMA', 'CORTESIA', 'SALIDA_INTERNA'].includes(r.type) ? '-' : '+'}${r.quantity} unds</td>
+        <td class="p-3 text-center font-black ${isDecrease ? 'text-rose-600' : 'text-emerald-600'}">${isDecrease ? '-' : '+'}${r.quantity} unds</td>
         <td class="p-3 text-slate-600 font-medium">${r.doc_type} ${r.doc_number ? '<span class="font-mono text-xs font-bold text-slate-700">#' + r.doc_number + '</span>' : ''}</td>
         <td class="p-3 text-slate-700 font-bold"><i class="fa-solid fa-user-tag text-blue-500 mr-1"></i>${r.user_name}</td>
         <td class="p-3 text-slate-500 text-xs">${r.supplier_notes || '-'}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-rose-500 font-bold">Error cargando kardex: ${err.message}</td></tr>`;
   }
