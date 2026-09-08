@@ -125,7 +125,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 // ==========================================
 // 1. DASHBOARD & MÉTRICAS
 // ==========================================
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', authMiddleware, async (req, res) => {
   try {
     const querySales = `
       SELECT 
@@ -364,7 +364,7 @@ app.delete('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
 // ==========================================
 // 3. CLIENTES & CRM
 // ==========================================
-app.get('/api/customers', async (req, res) => {
+app.get('/api/customers', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(`
       SELECT id, doc, name, phone, address, debt::float AS debt, created_at 
@@ -396,6 +396,9 @@ app.post('/api/customers', authMiddleware, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('❌ Error registrando cliente:', err.message);
+    if (err.code === '23505') {
+      return res.status(400).json({ error: '⚠️ Ya existe un cliente registrado con este Documento (DNI/RUC).' });
+    }
     res.status(500).json({ error: 'Error al registrar cliente.' });
   }
 });
@@ -579,7 +582,7 @@ app.post('/api/cash-register/close', authMiddleware, async (req, res) => {
 // ==========================================
 // 5. VENTAS & REPORTES AVANZADOS CON AUDITORÍA DE VENDEDOR
 // ==========================================
-app.get('/api/sales', async (req, res) => {
+app.get('/api/sales', authMiddleware, async (req, res) => {
   const { startDate, endDate, paymentMethod, docType, userId, q } = req.query;
 
   try {
@@ -640,6 +643,8 @@ app.get('/api/sales', async (req, res) => {
         s.total::float AS total,
         s.subtotal::float AS subtotal,
         s.tax::float AS tax,
+        COALESCE(s.mixed_cash, 0)::float AS mixed_cash,
+        COALESCE(s.mixed_other, 0)::float AS mixed_other,
         s.status, 
         s.created_at,
         COALESCE(
@@ -668,6 +673,10 @@ app.get('/api/sales', async (req, res) => {
       else if (s.payment_method === 'Tarjeta') breakdown.card += s.total;
       else if (s.payment_method === 'Yape/Plin') breakdown.transfer += s.total;
       else if (s.payment_method === 'Fiado') breakdown.fiado += s.total;
+      else if (s.payment_method === 'Pago Mixto') {
+        breakdown.cash += (parseFloat(s.mixed_cash) || 0);
+        breakdown.transfer += (parseFloat(s.mixed_other) || 0);
+      }
     });
 
     // Consultar abonos de fiados para el informe de reportes
@@ -972,7 +981,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 // ==========================================
 // 6. MÓDULO FIADOS & ABONOS
 // ==========================================
-app.get('/api/fiados/:customerId', async (req, res) => {
+app.get('/api/fiados/:customerId', authMiddleware, async (req, res) => {
   const { customerId } = req.params;
   try {
     const result = await db.query(`
@@ -1017,11 +1026,11 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
 
     let updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1 WHERE status = 'abierta'";
     if (payMethod === 'Efectivo') {
-      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, cash_sales = cash_sales + $1 WHERE status = 'abierta'";
+      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1 WHERE status = 'abierta'";
     } else if (payMethod === 'Tarjeta') {
-      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, card_sales = card_sales + $1 WHERE status = 'abierta'";
+      updateCashSql = "UPDATE cash_registers SET card_sales = card_sales + $1 WHERE status = 'abierta'";
     } else if (payMethod === 'Yape/Plin') {
-      updateCashSql = "UPDATE cash_registers SET fiado_abonos = COALESCE(fiado_abonos, 0) + $1, transfer_sales = transfer_sales + $1 WHERE status = 'abierta'";
+      updateCashSql = "UPDATE cash_registers SET transfer_sales = transfer_sales + $1 WHERE status = 'abierta'";
     }
     await client.query(updateCashSql, [abonoAmt]);
 

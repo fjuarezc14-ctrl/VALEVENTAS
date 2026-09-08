@@ -322,6 +322,8 @@ function setupKeyboardShortcuts() {
       closeUserModal();
       closePasswordModal();
       closeEditSaleModal();
+      closeKardexModal();
+      closeWithdrawalModal();
       focusSearchInput();
       return;
     }
@@ -891,6 +893,12 @@ function updateCartQty(productId, delta) {
   const item = CART.find(i => i.product.id === productId);
   if (!item) return;
 
+  if (delta > 0 && item.quantity + delta > item.product.stock) {
+    playBeep('error');
+    alert(`⚠️ Stock máximo alcanzado (${item.product.stock} unidades disponibles de "${item.product.name}").`);
+    return;
+  }
+
   item.quantity += delta;
   if (item.quantity <= 0) {
     CART = CART.filter(i => i.product.id !== productId);
@@ -1259,6 +1267,14 @@ async function processFinalSale() {
 
   let total = CART.reduce((sum, i) => sum + (i.product.price * i.quantity), 0);
   const paidAmount = parseFloat(document.getElementById('input-paid-amount').value) || total;
+
+  if (selectedPaymentMethod === 'Efectivo' && paidAmount < total) {
+    playBeep('error');
+    alert(`⚠️ El monto recibido (S/ ${paidAmount.toFixed(2)}) no puede ser menor al total a pagar (S/ ${total.toFixed(2)}).`);
+    document.getElementById('input-paid-amount')?.focus();
+    return;
+  }
+
   const changeAmount = paidAmount > total ? paidAmount - total : 0;
 
   const mixedCash = selectedPaymentMethod === 'Pago Mixto' ? (parseFloat(document.getElementById('mixed-cash-input')?.value) || 0) : 0;
