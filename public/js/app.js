@@ -262,14 +262,27 @@ function switchTab(tabId) {
   const targetView = document.getElementById('view-' + tabId);
   if (targetView) targetView.classList.remove('hidden');
 
+  const isAdmin = currentUser && currentUser.role === 'Admin';
+
   document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.className = 'nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all';
+    btn.classList.remove('bg-blue-600', 'text-white', 'font-bold', 'shadow-md');
+    btn.classList.add('text-slate-400', 'hover:bg-slate-800', 'hover:text-white', 'font-semibold');
   });
 
   const activeBtn = document.getElementById('btn-tab-' + tabId);
   if (activeBtn) {
-    activeBtn.className = 'nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-md';
+    activeBtn.classList.remove('text-slate-400', 'hover:bg-slate-800');
+    activeBtn.classList.add('bg-blue-600', 'text-white', 'font-bold', 'shadow-md');
   }
+
+  // Mantener ocultos de forma permanente y estricta los elementos administrativos para el rol Cajero
+  document.querySelectorAll('.admin-only').forEach(el => {
+    if (isAdmin) {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  });
 
   if (tabId === 'pos') focusSearchInput();
   if (tabId === 'dashboard') loadDashboard();
