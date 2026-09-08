@@ -1901,13 +1901,14 @@ function renderFiadosTable() {
   const tbody = document.getElementById('fiados-table-body');
   if (!tbody) return;
 
-  const debtCount = CLIENTS.filter(c => c.debt > 0).length;
+  const debtCount = CLIENTS.filter(c => (c.debt || 0) >= 0.01).length;
   const badge = document.getElementById('fiado-debt-count');
   if (badge) badge.innerText = debtCount;
 
   const filtered = CLIENTS.filter(c => {
     const matchQuery = c.name.toLowerCase().includes(query) || c.doc.toLowerCase().includes(query);
-    const matchDebt = fiadoFilter === 'all' || (fiadoFilter === 'debt' && c.debt > 0);
+    const hasDebt = (c.debt || 0) >= 0.01;
+    const matchDebt = fiadoFilter === 'all' || (fiadoFilter === 'debt' && hasDebt);
     return matchQuery && matchDebt;
   });
 
@@ -1921,7 +1922,7 @@ function renderFiadosTable() {
       <td class="p-4 font-mono text-xs text-slate-500">${c.doc}</td>
       <td class="p-4 font-bold text-slate-800">${c.name}</td>
       <td class="p-4 text-slate-500">${c.phone || '-'}</td>
-      <td class="p-4 text-right font-black ${c.debt > 0 ? 'text-amber-600' : 'text-slate-400'}">S/ ${c.debt.toFixed(2)}</td>
+      <td class="p-4 text-right font-black ${(c.debt || 0) >= 0.01 ? 'text-amber-600' : 'text-slate-400'}">S/ ${(c.debt || 0).toFixed(2)}</td>
       <td class="p-4 text-center">
         <button onclick="openFiadoModal(${c.id})" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors">
           <i class="fa-solid fa-file-invoice-dollar mr-1"></i>Ver / Registrar Abono

@@ -753,7 +753,7 @@ app.put('/api/sales/:id', authMiddleware, adminOnly, async (req, res) => {
     if (oldSale.payment_method === 'Fiado' && oldSale.customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [oldSale.customer_id]);
       if (custRes.rows[0]) {
-        const revertedDebt = Math.max(0, custRes.rows[0].debt - oldTotal);
+        const revertedDebt = Math.round(Math.max(0, custRes.rows[0].debt - oldTotal) * 100) / 100;
         await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [revertedDebt, oldSale.customer_id]);
       }
     }
@@ -767,7 +767,7 @@ app.put('/api/sales/:id', authMiddleware, adminOnly, async (req, res) => {
     if (finalPayMethod === 'Fiado' && finalCustId) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [finalCustId]);
       if (custRes.rows[0]) {
-        const newDebt = custRes.rows[0].debt + oldTotal;
+        const newDebt = Math.round((custRes.rows[0].debt + oldTotal) * 100) / 100;
         await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, finalCustId]);
       }
     }
@@ -895,7 +895,7 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
     // 2. Revertir impacto si fue Fiado
     if (sale.payment_method === 'Fiado' && sale.customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [sale.customer_id]);
-      const newDebt = Math.max(0, custRes.rows[0].debt - sale.total);
+      const newDebt = Math.round(Math.max(0, custRes.rows[0].debt - sale.total) * 100) / 100;
       await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, sale.customer_id]);
       await client.query(`
         INSERT INTO fiado_payments (customer_id, type, amount, details, balance_after)
@@ -1064,7 +1064,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
     // 5. Fiado
     if (payment_method === 'Fiado' && customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [customer_id]);
-      const newDebt = (custRes.rows[0] ? custRes.rows[0].debt : 0) + total;
+      const newDebt = Math.round(((custRes.rows[0] ? custRes.rows[0].debt : 0) + total) * 100) / 100;
       const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ');
 
       await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [customer_id, newDebt]);
@@ -1144,7 +1144,7 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Cliente no encontrado.' });
     }
 
-    const newDebt = Math.max(0, customer.debt - abonoAmt);
+    const newDebt = Math.round(Math.max(0, customer.debt - abonoAmt) * 100) / 100;
     await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, customer_id]);
 
     await client.query(`
@@ -1217,7 +1217,7 @@ app.post('/api/fiados/abono/:id/anular', authMiddleware, adminOnly, async (req, 
     }
 
     // 1. Restaurar la deuda del cliente
-    const restoredDebt = customer.debt + payment.amount;
+    const restoredDebt = Math.round((customer.debt + payment.amount) * 100) / 100;
     await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [restoredDebt, payment.customer_id]);
 
     // 2. Registrar el movimiento de anulación en el historial
