@@ -14,11 +14,25 @@ const pool = new Pool({
 });
 
 // Probar conexión e inicializar esquemas de tablas
-async function initDb() {
+async function initDb(retries = 8, delay = 2000) {
+  while (retries > 0) {
+    try {
+      const client = await pool.connect();
+      console.log('✅ Base de Datos PostgreSQL conectada exitosamente.');
+      client.release();
+      break;
+    } catch (err) {
+      retries--;
+      console.warn(`⏳ Esperando a PostgreSQL (${err.message})... Reintentos restantes: ${retries}`);
+      if (retries === 0) {
+        console.error('❌ Error conectando o inicializando PostgreSQL:', err.message);
+        return;
+      }
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+
   try {
-    const client = await pool.connect();
-    console.log('✅ Base de Datos PostgreSQL conectada exitosamente.');
-    client.release();
 
     // 1. PRODUCTOS
     await pool.query(`

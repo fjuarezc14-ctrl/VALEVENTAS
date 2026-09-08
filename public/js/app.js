@@ -1723,26 +1723,6 @@ async function processAbono() {
   }
 }
 
-    document.getElementById('rec-items').innerHTML = `
-      <div class="py-2 space-y-1">
-        <p class="font-bold text-xs text-slate-800">PAGO / ABONO A CUENTA FIADO</p>
-        <p class="text-[10px] text-slate-500">Cajero que Cobró: ${data.user_name || (currentUser ? currentUser.name : 'Sistema')}</p>
-        <p class="text-xs text-emerald-600 font-black pt-1">Monto Cobrado: S/ ${amount.toFixed(2)}</p>
-        <p class="text-xs text-slate-800 font-bold">Saldo Deuda Restante: S/ ${(data.newDebt || 0).toFixed(2)}</p>
-      </div>
-    `;
-
-    document.getElementById('modal-receipt').classList.remove('hidden');
-
-    await loadCustomers();
-    await loadDashboard();
-    await loadCurrentCashRegister();
-  } catch (err) {
-    playBeep('error');
-    alert('❌ Error: ' + err.message);
-  }
-}
-
 // ==========================================
 // 4. REPORTES & HISTORIAL DE VENTAS CON EDITAR/ANULAR POR ADMIN
 // ==========================================
