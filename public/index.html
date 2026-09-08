@@ -4,17 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VALE-VENTAS by VALETEC | Sistema POS & Fiados</title>
-  <script>
-    (function(){
-      var _warn = console.warn;
-      console.warn = function(){
-        if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].includes('cdn.tailwindcss.com')) return;
-        _warn.apply(console, arguments);
-      };
-    })();
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/css/tailwind.min.css">
+  <link rel="stylesheet" href="/css/all.min.css">
   <style>
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -28,18 +19,37 @@
       body * {
         visibility: hidden;
       }
-      #modal-receipt, #modal-receipt * {
+      #modal-receipt, #modal-receipt *, #modal-cierre-z-receipt, #modal-cierre-z-receipt * {
         visibility: visible;
       }
-      #modal-receipt {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 80mm;
-        margin: 0;
-        padding: 0;
-        background: white;
-        box-shadow: none;
+      #modal-receipt, #modal-cierre-z-receipt {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        max-width: 80mm !important;
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 6px !important;
+        background: white !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      #modal-receipt > div, #modal-cierre-z-receipt > div {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+        box-shadow: none !important;
+        border: none !important;
+        padding: 0 !important;
+        width: 100% !important;
+      }
+      #rec-items, #rec-items-body, #rec-items-table, .custom-scrollbar {
+        overflow: visible !important;
+        max-height: none !important;
+        height: auto !important;
       }
       .no-print {
         display: none !important;
@@ -72,7 +82,7 @@
 
     <!-- MENÚ -->
     <nav class="p-4 space-y-1.5 flex-1 overflow-y-auto custom-scrollbar" id="main-nav">
-      <button onclick="switchTab('dashboard')" id="btn-tab-dashboard" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all">
+      <button onclick="switchTab('dashboard')" id="btn-tab-dashboard" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all admin-only hidden">
         <i class="fa-solid fa-chart-pie w-5"></i> Dashboard
       </button>
       <button onclick="switchTab('pos')" id="btn-tab-pos" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-600 text-white font-bold transition-all shadow-md">
@@ -87,12 +97,18 @@
       <button onclick="switchTab('fiados')" id="btn-tab-fiados" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all">
         <i class="fa-solid fa-hand-holding-dollar w-5"></i> Módulo Fiados
       </button>
-      <button onclick="switchTab('reports')" id="btn-tab-reports" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all">
+      <button onclick="switchTab('reports')" id="btn-tab-reports" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all admin-only hidden">
         <i class="fa-solid fa-file-invoice-dollar w-5"></i> Reportes
       </button>
       <div class="border-t border-slate-800 my-2 pt-2"></div>
       <button onclick="switchTab('users')" id="btn-tab-users" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all admin-only hidden">
         <i class="fa-solid fa-shield-halved w-5"></i> Control de Acceso
+      </button>
+      <button onclick="switchTab('company')" id="btn-tab-company" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all admin-only hidden">
+        <i class="fa-solid fa-building w-5"></i> Mi Empresa & RUC
+      </button>
+      <button onclick="downloadBackup()" id="btn-tab-backup" class="nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white font-semibold transition-all admin-only hidden">
+        <i class="fa-solid fa-cloud-arrow-down w-5"></i> Copia de Seguridad
       </button>
     </nav>
 
@@ -110,6 +126,13 @@
           <i class="fa-solid fa-right-from-bracket text-sm"></i>
         </button>
       </div>
+    </div>
+
+    <!-- FIRMA OFICIAL DE DESARROLLO EN SISTEMA -->
+    <div class="px-4 py-3 border-t border-slate-800 text-[10px] text-slate-400 text-center leading-tight bg-slate-950/80">
+      <p class="font-bold text-slate-300 tracking-wider">VT VENTAS POS</p>
+      <p class="mt-0.5">Desarrollado por <span class="font-bold text-slate-100">VT VENTAS</span> | <span class="font-bold text-blue-400">VT VALETEC</span></p>
+      <p class="text-[9px] text-slate-500 mt-0.5">Tecnología para Puntos de Venta</p>
     </div>
   </aside>
 
@@ -279,7 +302,7 @@
                   <th class="p-3 sm:p-4">Código</th>
                   <th class="p-3 sm:p-4">Producto</th>
                   <th class="p-3 sm:p-4">Categoría</th>
-                  <th class="p-3 sm:p-4">P. Compra</th>
+                  <th class="p-3 sm:p-4 admin-only">P. Compra</th>
                   <th class="p-3 sm:p-4">P. Venta</th>
                   <th class="p-3 sm:p-4">Stock</th>
                   <th class="p-3 sm:p-4 text-center">Acciones / Reabastecimiento</th>
@@ -332,8 +355,16 @@
         </h2>
 
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div class="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex gap-4">
+          <div class="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
             <input type="text" id="fiado-search-input" oninput="renderFiadosTable()" placeholder="Buscar cliente por DNI/RUC o Nombre..." class="flex-1 px-4 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm focus:outline-none focus:border-amber-500">
+            <div class="flex gap-2">
+              <button id="fiado-filter-debt" onclick="setFiadoFilter('debt')" class="fiado-filter-btn bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors">
+                <i class="fa-solid fa-filter"></i> Solo con Deuda (<span id="fiado-debt-count">0</span>)
+              </button>
+              <button id="fiado-filter-all" onclick="setFiadoFilter('all')" class="fiado-filter-btn bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-300 transition-colors">
+                Todos
+              </button>
+            </div>
           </div>
           <div class="overflow-x-auto custom-scrollbar">
             <table class="w-full text-left text-xs sm:text-sm text-slate-600 min-w-[700px]">
@@ -472,7 +503,7 @@
                   <th class="p-3 sm:p-4">Método Pago</th>
                   <th class="p-3 sm:p-4 text-right">Total</th>
                   <th class="p-3 sm:p-4 text-right text-emerald-700 admin-only">Ganancia Neta</th>
-                  <th class="p-3 sm:p-4 text-center admin-only">Acciones</th>
+                  <th class="p-3 sm:p-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody id="history-table-body" class="divide-y divide-slate-100 font-medium"></tbody>
@@ -512,6 +543,136 @@
               </thead>
               <tbody id="users-table-body" class="divide-y divide-slate-100 font-medium"></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. CONFIGURACIÓN DE LA EMPRESA & DATOS FISCALES (ADMIN ONLY) -->
+    <section id="view-company" class="view-section hidden p-3 sm:p-6 overflow-y-auto w-full h-full admin-only">
+      <div class="max-w-6xl mx-auto w-full space-y-4 sm:space-y-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h2 class="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-2">
+              <i class="fa-solid fa-building text-blue-600"></i> Mi Empresa & Datos Fiscales
+            </h2>
+            <p class="text-xs text-slate-500">Configuración independiente de su tienda. Estos datos se reflejan automáticamente en todos sus tickets, boletas, facturas y arqueos de caja.</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+            <i class="fa-solid fa-code text-blue-600"></i> Software POS: <span class="font-black text-slate-800">VT VENTAS</span> | <span class="font-black text-blue-600">VT VALETEC</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <!-- FORMULARIO DE CONFIGURACIÓN -->
+          <div class="lg:col-span-7 bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-4">
+            <h3 class="font-bold text-slate-800 text-sm border-b border-slate-100 pb-3 flex items-center gap-2">
+              <i class="fa-solid fa-pen-nib text-blue-600"></i> Información Comercial y Legal del Establecimiento
+            </h3>
+
+            <form onsubmit="saveCompanySettingsFromView(event)" class="space-y-3.5">
+              <div>
+                <label class="text-xs font-bold text-slate-700 block mb-1">Nombre Comercial / Razón Social de la Tienda *</label>
+                <input type="text" id="setting-company-name-view" oninput="syncCompanyPreview()" required placeholder="ej. BODEGA Y MARKET DON JOSÉ" class="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all">
+                <p class="text-[10px] text-slate-400 mt-0.5">Nombre que saldrá impreso en la cabecera principal de los comprobantes.</p>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1">RUC del Negocio (11 Dígitos) *</label>
+                  <input type="text" id="setting-company-ruc-view" oninput="syncCompanyPreview()" maxlength="20" required placeholder="ej. 20601234567" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white">
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1">Teléfono / WhatsApp de Contacto</label>
+                  <input type="text" id="setting-company-phone-view" oninput="syncCompanyPreview()" placeholder="ej. 987 654 321" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white">
+                </div>
+              </div>
+
+              <div>
+                <label class="text-xs font-bold text-slate-700 block mb-1">Dirección del Establecimiento / Local</label>
+                <input type="text" id="setting-company-address-view" oninput="syncCompanyPreview()" placeholder="ej. Av. Los Próceres 450 - San Borja, Lima" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white">
+              </div>
+
+              <div>
+                <label class="text-xs font-bold text-slate-700 block mb-1">Mensaje de Despedida / Garantía al Pie del Ticket</label>
+                <textarea id="setting-company-footer-view" oninput="syncCompanyPreview()" rows="2" placeholder="ej. ¡Gracias por su compra! Los cambios de mercadería son dentro de las 48 horas con este ticket." class="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white"></textarea>
+              </div>
+
+              <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <p class="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <i class="fa-solid fa-circle-check"></i> Sincronización instantánea con todos los POS
+                </p>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-xs sm:text-sm shadow-md transition-all flex items-center gap-2">
+                  <i class="fa-solid fa-floppy-disk"></i> Guardar Configuración
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- VISTA PREVIA DEL COMPROBANTE TÉRMICO -->
+          <div class="lg:col-span-5 bg-slate-100 rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-inner flex flex-col items-center">
+            <p class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-1.5">
+              <i class="fa-solid fa-receipt text-blue-600"></i> Vista Previa en Impresora Térmica
+            </p>
+
+            <div class="w-full max-w-[280px] bg-white rounded-2xl p-4 shadow-md font-mono text-[11px] border border-slate-200 text-slate-800 space-y-2.5">
+              <div class="text-center border-b border-dashed border-slate-300 pb-2.5">
+                <h4 class="font-black text-xs text-slate-900 leading-tight" id="prev-company-name">MI BODEGA</h4>
+                <p class="text-[9px] text-slate-500 font-sans" id="prev-company-address">Av. Principal 123</p>
+                <p class="text-[10px] font-bold text-slate-700 mt-0.5" id="prev-company-ruc">RUC: 20123456789</p>
+                <p class="text-[9px] text-slate-500" id="prev-company-phone">Telf: 987654321</p>
+                <div class="border-t border-slate-200 my-1"></div>
+                <p class="font-bold text-[10px] text-slate-900">BOLETA ELECTRÓNICA</p>
+                <p class="text-slate-500 text-[9px] font-bold">B001-000124</p>
+              </div>
+
+              <div class="text-[10px] text-slate-600 space-y-0.5 border-b border-dashed border-slate-300 pb-2">
+                <p>Fecha: 08/09/2026 11:30</p>
+                <p>Cliente: Carlos Ramirez</p>
+                <p class="font-bold">DNI: 45892301</p>
+              </div>
+
+              <!-- DETALLE TABLA -->
+              <div class="border-b border-dashed border-slate-300 pb-2 text-[10px]">
+                <div class="grid grid-cols-12 font-bold border-b border-slate-200 pb-1 text-slate-700">
+                  <span class="col-span-2 text-center">CANT</span>
+                  <span class="col-span-5">PRODUCTO</span>
+                  <span class="col-span-2 text-right">P.U</span>
+                  <span class="col-span-3 text-right">TOTAL</span>
+                </div>
+                <div class="grid grid-cols-12 py-1 text-slate-800">
+                  <span class="col-span-2 text-center font-bold">2</span>
+                  <span class="col-span-5 truncate">Arroz 1kg</span>
+                  <span class="col-span-2 text-right">4.50</span>
+                  <span class="col-span-3 text-right font-bold">9.00</span>
+                </div>
+                <div class="grid grid-cols-12 py-1 text-slate-800">
+                  <span class="col-span-2 text-center font-bold">1</span>
+                  <span class="col-span-5 truncate">Aceite 1L</span>
+                  <span class="col-span-2 text-right">9.20</span>
+                  <span class="col-span-3 text-right font-bold">9.20</span>
+                </div>
+              </div>
+
+              <!-- DESGLOSE FISCAL -->
+              <div class="space-y-0.5 text-[10px] text-slate-600">
+                <div class="flex justify-between"><span>Op. Gravada:</span><span class="font-bold">S/ 15.42</span></div>
+                <div class="flex justify-between"><span>I.G.V. (18%):</span><span class="font-bold">S/ 2.78</span></div>
+                <div class="flex justify-between text-xs font-black text-slate-900 pt-1 border-t border-slate-200">
+                  <span>TOTAL A PAGAR:</span>
+                  <span class="text-blue-700">S/ 18.20</span>
+                </div>
+              </div>
+
+              <!-- MENSAJE PERSONALIZADO Y FIRMA DE DESARROLLO -->
+              <div class="text-center pt-2 border-t border-dashed border-slate-300 space-y-1.5">
+                <p class="text-[9px] text-slate-600 italic" id="prev-company-footer">¡Gracias por su preferencia!</p>
+                <div class="pt-1.5 border-t border-dotted border-slate-300 text-[8px] text-slate-400 font-sans leading-tight">
+                  <p class="font-bold text-slate-500">VALE-VENTAS POS</p>
+                  <p>Desarrollado por <span class="font-bold text-slate-600">VT VENTAS</span> | <span class="font-bold text-blue-600">VT VALETEC</span></p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -664,7 +825,7 @@
           <input type="text" id="stock-intake-doc-number" placeholder="ej. GR-001-004589" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500">
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 admin-only">
           <div>
             <label class="text-xs font-bold text-slate-600 block mb-1">Nuevo P. Compra (S/) [Opcional]</label>
             <input type="number" step="0.10" id="stock-intake-new-purchase" placeholder="Opcional" class="w-full p-2 border border-slate-300 rounded-xl text-xs outline-none">
@@ -1083,7 +1244,12 @@
             <span class="text-xl sm:text-2xl font-black text-amber-600" id="fiado-modal-balance">S/ 0.00</span>
           </div>
           <div class="bg-slate-50 border border-slate-200 p-3.5 sm:p-4 rounded-2xl flex flex-col justify-between gap-2">
-            <span class="text-[10px] sm:text-xs font-bold text-slate-600 uppercase tracking-wider block">Registrar Abono / Pago</span>
+            <div class="flex justify-between items-center">
+              <span class="text-[10px] sm:text-xs font-bold text-slate-600 uppercase tracking-wider">Registrar Abono / Pago</span>
+              <button type="button" onclick="setFullAbonoAmount()" class="bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors flex items-center gap-1">
+                <i class="fa-solid fa-bolt"></i> Pagar Todo
+              </button>
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input type="number" id="input-abono-amount" placeholder="Monto S/" step="0.50"
                 class="w-full p-2 border border-slate-300 rounded-xl font-bold text-xs sm:text-sm outline-none focus:ring-2 focus:ring-amber-500">
@@ -1112,6 +1278,7 @@
                   <th class="p-3">Detalle</th>
                   <th class="p-3 text-right">Monto</th>
                   <th class="p-3 text-right">Saldo Resultante</th>
+                  <th class="p-3 text-center admin-only">Acciones</th>
                 </tr>
               </thead>
               <tbody id="fiado-modal-history" class="divide-y divide-slate-100 font-medium"></tbody>
@@ -1126,15 +1293,20 @@
   <div id="modal-receipt" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-3xl w-full max-w-sm max-h-[92vh] overflow-hidden shadow-2xl p-5 sm:p-6 font-mono text-xs flex flex-col space-y-3 sm:space-y-4">
       <div class="text-center border-b border-dashed border-slate-300 pb-3 shrink-0">
-        <h2 class="font-black text-sm text-slate-900">VALE-VENTAS by VALETEC</h2>
-        <p class="text-[10px] text-slate-500">Bodega & POS Local</p>
-        <p class="font-bold text-slate-800 mt-2" id="rec-title">TICKET DE VENTA</p>
-        <p class="text-slate-500 text-[10px]" id="rec-id">T001-000000</p>
+        <h2 class="font-black text-sm text-slate-900" id="rec-company-name">VALE-VENTAS by VALETEC</h2>
+        <p class="text-[10px] text-slate-500" id="rec-company-sub">Bodega & POS Local</p>
+        <p class="text-[10px] text-slate-600 font-bold" id="rec-company-ruc">RUC: 20123456789</p>
+        <p class="text-[9px] text-slate-500" id="rec-company-address">Av. Principal 123 - Lima, Perú</p>
+        <p class="text-[9px] text-slate-500" id="rec-company-phone">Telf: 987654321</p>
+        <p class="font-bold text-slate-800 mt-2 text-xs" id="rec-title">TICKET DE VENTA</p>
+        <p class="text-slate-500 text-[10px] font-bold" id="rec-id">T001-000000</p>
       </div>
 
       <div class="space-y-1 text-slate-600 text-[11px] shrink-0">
         <p id="rec-date">Fecha: --</p>
         <p id="rec-customer">Cliente: Público General</p>
+        <p id="rec-customer-doc" class="hidden font-bold text-slate-700">DNI/RUC: --</p>
+        <p id="rec-seller" class="text-[10px] text-slate-500">Cajero: --</p>
       </div>
 
       <div class="border-t border-b border-dashed border-slate-300 py-3 space-y-1.5 flex-1 overflow-y-auto custom-scrollbar" id="rec-items">
@@ -1142,9 +1314,21 @@
       </div>
 
       <div class="space-y-1 font-bold text-slate-800 text-xs shrink-0">
+        <!-- Desglose Fiscal SUNAT para Boletas y Facturas -->
+        <div id="rec-tax-breakdown" class="hidden space-y-1 border-b border-dashed border-slate-300 pb-1.5 mb-1.5 font-normal text-[11px] text-slate-600">
+          <div class="flex justify-between">
+            <span>Op. Gravada (Subtotal):</span>
+            <span id="rec-subtotal" class="font-bold text-slate-800">S/ 0.00</span>
+          </div>
+          <div class="flex justify-between">
+            <span>I.G.V. (18%):</span>
+            <span id="rec-tax" class="font-bold text-slate-800">S/ 0.00</span>
+          </div>
+        </div>
+
         <div class="flex justify-between text-sm font-black text-slate-900 pt-1">
-          <span>TOTAL:</span>
-          <span id="rec-total">S/ 0.00</span>
+          <span id="rec-total-label">TOTAL A PAGAR:</span>
+          <span id="rec-total" class="text-blue-700">S/ 0.00</span>
         </div>
         <div class="flex justify-between text-[11px] text-slate-600 font-normal">
           <span>Método Pago:</span>
@@ -1160,9 +1344,17 @@
         </div>
       </div>
 
-      <div class="text-center pt-3 border-t border-dashed border-slate-300 space-y-2 shrink-0 no-print">
-        <p class="text-[10px] text-slate-400">¡Gracias por su preferencia!</p>
-        <div class="flex gap-2 justify-center">
+      <div class="text-center pt-3 border-t border-dashed border-slate-300 space-y-2 shrink-0">
+        <p class="text-[10px] text-slate-600 font-medium italic" id="rec-footer-text">¡Gracias por su preferencia! Vuelva pronto.</p>
+        
+        <!-- FIRMA OFICIAL DE DESARROLLO EN COMPROBANTES -->
+        <div class="pt-2 border-t border-dotted border-slate-300 text-[9px] text-slate-400 font-sans leading-tight">
+          <p class="font-bold tracking-wider text-slate-600">VALE-VENTAS POS</p>
+          <p>Software POS desarrollado por <span class="font-black text-slate-700">VT VENTAS</span> | <span class="font-black text-blue-600">VT VALETEC</span></p>
+          <p class="text-[8px] text-slate-400">Soluciones de Software & Punto de Venta</p>
+        </div>
+
+        <div class="flex gap-2 justify-center no-print pt-1">
           <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-sans font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 shadow-sm">
             <i class="fa-solid fa-print"></i> Imprimir Ticket
           </button>
@@ -1171,6 +1363,151 @@
           </button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL RECIBO DE IMPRESIÓN CIERRE Z (ARQUEO FÍSICO IMPRIMIBLE) -->
+  <div id="modal-cierre-z-receipt" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl w-full max-w-sm max-h-[92vh] overflow-hidden shadow-2xl p-5 sm:p-6 font-mono text-xs flex flex-col space-y-3">
+      <div class="text-center border-b border-dashed border-slate-300 pb-3 shrink-0">
+        <h2 class="font-black text-sm text-slate-900" id="z-company-name">VALE-VENTAS by VALETEC</h2>
+        <p class="text-[10px] text-slate-500" id="z-company-address">Av. Principal 123 - Lima, Perú</p>
+        <p class="text-[10px] text-slate-600 font-bold" id="z-company-ruc">RUC: 20123456789</p>
+        <p class="font-black text-slate-900 mt-2 text-xs uppercase tracking-wider">ARQUEO Y CIERRE DE CAJA (TURNO Z)</p>
+        <p class="text-slate-500 text-[10px] font-bold" id="z-register-id">CAJA #000</p>
+      </div>
+
+      <div class="space-y-1 text-slate-600 text-[11px] shrink-0 border-b border-dashed border-slate-300 pb-2">
+        <p><span class="font-bold">Cajero / Usuario:</span> <span id="z-user-name">--</span></p>
+        <p><span class="font-bold">Apertura:</span> <span id="z-opened-at">--</span></p>
+        <p><span class="font-bold">Cierre:</span> <span id="z-closed-at">--</span></p>
+      </div>
+
+      <div class="space-y-1 text-[11px] text-slate-700 flex-1 overflow-y-auto custom-scrollbar">
+        <div class="flex justify-between">
+          <span>Fondo Inicial:</span>
+          <span id="z-opening-amount" class="font-bold">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between">
+          <span>(+) Ventas Efectivo:</span>
+          <span id="z-cash-sales" class="font-bold">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between text-emerald-800">
+          <span>(+) Abonos Fiado Efectivo:</span>
+          <span id="z-fiado-abonos" class="font-bold text-emerald-700">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between text-rose-800">
+          <span>(-) Retiros de Dinero:</span>
+          <span id="z-withdrawals" class="font-bold text-rose-700">S/ 0.00</span>
+        </div>
+        
+        <div class="border-t border-slate-200 my-1 pt-1"></div>
+        
+        <div class="flex justify-between text-slate-600">
+          <span>Ventas Tarjeta:</span>
+          <span id="z-card-sales" class="font-bold">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between text-slate-600">
+          <span>Ventas Yape / Plin:</span>
+          <span id="z-transfer-sales" class="font-bold">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between text-amber-700">
+          <span>Ventas a Fiado:</span>
+          <span id="z-fiado-sales" class="font-bold text-amber-600">S/ 0.00</span>
+        </div>
+        <div class="flex justify-between text-slate-900 font-bold border-t border-slate-200 pt-1">
+          <span>Total Ventas Turno:</span>
+          <span id="z-total-sales" class="font-black">S/ 0.00</span>
+        </div>
+
+        <div class="border-t border-dashed border-slate-300 my-1.5 pt-1.5 space-y-1">
+          <div class="flex justify-between font-bold text-slate-900">
+            <span>Efectivo Esperado:</span>
+            <span id="z-expected-cash" class="font-black text-blue-700">S/ 0.00</span>
+          </div>
+          <div class="flex justify-between font-bold text-slate-900">
+            <span>Efectivo Real Contado:</span>
+            <span id="z-actual-cash" class="font-black">S/ 0.00</span>
+          </div>
+          <div class="flex justify-between font-black text-xs pt-1 border-t border-slate-200">
+            <span>Diferencia:</span>
+            <span id="z-difference" class="text-emerald-700">S/ 0.00</span>
+          </div>
+        </div>
+
+        <div id="z-notes-box" class="pt-1 text-[10px] text-slate-500 italic">
+          <p><span class="font-bold not-italic">Obs:</span> <span id="z-notes">Sin observaciones</span></p>
+        </div>
+
+        <!-- FIRMAS -->
+        <div class="pt-6 pb-2 grid grid-cols-2 gap-4 text-center text-[9px] text-slate-500">
+          <div class="border-t border-slate-400 pt-1">
+            Firma Cajero
+          </div>
+          <div class="border-t border-slate-400 pt-1">
+            Firma Administrador
+          </div>
+        </div>
+      </div>
+
+      <div class="text-center pt-2 border-t border-dashed border-slate-300 space-y-2 shrink-0">
+        <p class="text-[10px] text-slate-400">Comprobante de Control Interno</p>
+        
+        <!-- FIRMA OFICIAL DE DESARROLLO EN ARQUEO -->
+        <div class="pt-1.5 border-t border-dotted border-slate-300 text-[9px] text-slate-400 font-sans leading-tight">
+          <p class="font-bold text-slate-600">VALE-VENTAS POS</p>
+          <p>Software desarrollado por <span class="font-black text-slate-700">VT VENTAS</span> | <span class="font-black text-blue-600">VT VALETEC</span></p>
+        </div>
+
+        <div class="flex gap-2 justify-center no-print pt-1">
+          <button onclick="window.print()" class="bg-amber-600 hover:bg-amber-700 text-white font-sans font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 shadow-sm">
+            <i class="fa-solid fa-print"></i> Imprimir Cierre Z
+          </button>
+          <button onclick="closeCierreZModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-sans font-bold px-4 py-2 rounded-xl text-xs">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIGURACIÓN DE DATOS DEL NEGOCIO / BRANDING DE TICKETS -->
+  <div id="modal-company-settings" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-4 sm:p-6 space-y-4 max-h-[92vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
+        <h3 class="font-black text-base sm:text-lg text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-store text-blue-600"></i> Datos del Negocio & Tickets
+        </h3>
+        <button onclick="closeCompanySettingsModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form onsubmit="saveCompanySettings(event)" class="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-1">
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">Nombre Comercial de la Tienda *</label>
+          <input type="text" id="setting-company-name" required placeholder="ej. BODEGA & MARKET DON JOSÉ" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">RUC del Negocio *</label>
+          <input type="text" id="setting-company-ruc" maxlength="20" required placeholder="ej. 20123456789" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">Dirección del Local</label>
+          <input type="text" id="setting-company-address" placeholder="ej. Av. Las Flores 456 - Lima" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">Teléfono / WhatsApp de Contacto</label>
+          <input type="text" id="setting-company-phone" placeholder="ej. 987 654 321" class="w-full p-2.5 border border-slate-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">Mensaje de Despedida / Pie de Ticket</label>
+          <textarea id="setting-company-footer" rows="2" placeholder="ej. ¡Gracias por su compra! Vuelva pronto." class="w-full p-2.5 border border-slate-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium"></textarea>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeCompanySettingsModal()" class="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md">Guardar Configuración</button>
+        </div>
+      </form>
     </div>
   </div>
 

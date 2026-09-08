@@ -192,6 +192,22 @@ async function initDb(retries = 8, delay = 2000) {
       );
     `);
 
+    // 10. DATOS DE LA EMPRESA / CONFIGURACIÓN DE TICKETS
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS company_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        name VARCHAR(255) NOT NULL DEFAULT 'VALE-VENTAS by VALETEC',
+        ruc VARCHAR(50) NOT NULL DEFAULT '20123456789',
+        address VARCHAR(255) NOT NULL DEFAULT 'Av. Principal 123 - Lima, Perú',
+        phone VARCHAR(50) NOT NULL DEFAULT '987654321',
+        ticket_footer VARCHAR(255) NOT NULL DEFAULT '¡Gracias por su preferencia! Vuelva pronto.',
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO company_settings (id, name, ruc, address, phone, ticket_footer)
+      VALUES (1, 'VALE-VENTAS by VALETEC', '20123456789', 'Av. Principal 123 - Lima, Perú', '987654321', '¡Gracias por su preferencia! Vuelva pronto.')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
     await seedInitialData();
 
   } catch (err) {

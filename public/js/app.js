@@ -14,9 +14,18 @@ let currentActiveCustomerForFiado = null;
 let currentUser = null;
 let currentCashRegister = null;
 let inventoryFilterStock = 'all';
+let fiadoFilter = 'debt';
 let currentReportSales = [];
+let currentReportAbonos = [];
 let currentPasswordUserId = null;
 let socket = null;
+let COMPANY_SETTINGS = {
+  name: 'VALE-VENTAS by VALETEC',
+  ruc: '20123456789',
+  address: 'Av. Principal 123 - Lima, Perú',
+  phone: '987654321',
+  ticket_footer: '¡Gracias por su preferencia! Vuelva pronto.'
+};
 
 // Helper de Headers con Token JWT
 function getAuthHeaders() {
@@ -55,6 +64,7 @@ async function init() {
     openLoginModal();
   }
 
+  await loadCompanySettings();
   await loadDashboard();
   await loadProducts();
   await loadCustomers();
@@ -95,6 +105,12 @@ function initWebSockets() {
       await loadCustomers();
       await loadDashboard();
     });
+
+    socket.on('settings_changed', (settings) => {
+      console.log('⚡ Sincronización en tiempo real: Datos del negocio actualizados.');
+      COMPANY_SETTINGS = settings;
+      applyCompanySettingsToUI();
+    });
   }
 }
 
@@ -115,8 +131,17 @@ function updateUserUI() {
       }
     });
 
+    // Si el usuario es Cajero y está en una vista administrativa o no permitida, enviarlo a Punto de Venta
+    if (!isAdmin) {
+      const activeSection = document.querySelector('.view-section:not(.hidden)');
+      if (!activeSection || activeSection.id === 'view-dashboard' || activeSection.id === 'view-reports' || activeSection.id === 'view-users' || activeSection.id === 'view-company') {
+        switchTab('pos');
+      }
+    }
+
     // Re-renderizar tablas para asegurar que las filas dinámicas respeten el rol
     renderInventoryTable();
+    renderFiadosTable();
     renderSalesHistoryTable(currentReportSales);
 
     const loginModal = document.getElementById('modal-login');
@@ -210,8 +235,9 @@ function closeMobileSidebar() {
 
 function switchTab(tabId) {
   // Validación de seguridad para navegación por tabs
-  if (tabId === 'users' && (!currentUser || currentUser.role !== 'Admin')) {
-    alert('⚠️ Acceso denegado. Solo los usuarios con rol Administrador pueden ingresar al Control de Acceso.');
+  const adminTabs = ['dashboard', 'reports', 'users', 'company'];
+  if (adminTabs.includes(tabId) && (!currentUser || currentUser.role !== 'Admin')) {
+    alert('⚠️ Acceso restringido. Esta sección es exclusiva para el Administrador.');
     switchTab('pos');
     return;
   }
@@ -223,7 +249,8 @@ function switchTab(tabId) {
     crm: 'Clientes',
     fiados: 'Fiados',
     reports: 'Reportes',
-    users: 'Usuarios'
+    users: 'Usuarios',
+    company: 'Mi Empresa'
   };
   const titleEl = document.getElementById('mobile-current-tab-title');
   if (titleEl && tabTitles[tabId]) titleEl.innerText = tabTitles[tabId];
@@ -253,6 +280,7 @@ function switchTab(tabId) {
   }
   if (tabId === 'reports') loadSalesHistory();
   if (tabId === 'users') loadUsers();
+  if (tabId === 'company') populateCompanySettingsView();
 }
 
 // ==========================================
@@ -554,12 +582,75 @@ async function processCloseCashRegister(e) {
 
     closeCloseRegisterModal();
     playBeep('success');
-    alert('✅ Cierre de Caja Z realizado con éxito.');
     await loadCurrentCashRegister();
+
+    // Renderizar e invocar impresión del Ticket Térmico de Cierre Z
+    renderCierreZReceipt(data.register);
+
   } catch (err) {
     playBeep('error');
     alert('❌ ' + err.message);
   }
+}
+
+function renderCierreZReceipt(reg) {
+  if (!reg) return;
+  applyCompanySettingsToCierreZ();
+
+  const openDate = reg.opened_at ? new Date(reg.opened_at).toLocaleString() : '--';
+  const closeDate = reg.closed_at ? new Date(reg.closed_at).toLocaleString() : new Date().toLocaleString();
+
+  const opening = parseFloat(reg.opening_amount) || 0;
+  const cashSales = parseFloat(reg.cash_sales) || 0;
+  const fiadoAbonos = parseFloat(reg.fiado_abonos) || 0;
+  const withdrawals = parseFloat(reg.total_withdrawals) || 0;
+  const cardSales = parseFloat(reg.card_sales) || 0;
+  const transferSales = parseFloat(reg.transfer_sales) || 0;
+  const fiadoSales = parseFloat(reg.fiado_sales) || 0;
+  const totalSales = cashSales + cardSales + transferSales + fiadoSales;
+
+  const expected = parseFloat(reg.expected_cash) || (opening + cashSales + fiadoAbonos - withdrawals);
+  const actual = parseFloat(reg.actual_cash) || 0;
+  const diff = parseFloat(reg.difference) !== undefined ? parseFloat(reg.difference) : (actual - expected);
+
+  document.getElementById('z-register-id').innerText = `TURNO / CAJA #${String(reg.id).padStart(4, '0')}`;
+  document.getElementById('z-user-name').innerText = reg.user_name || (currentUser ? currentUser.name : 'Cajero');
+  document.getElementById('z-opened-at').innerText = openDate;
+  document.getElementById('z-closed-at').innerText = closeDate;
+
+  document.getElementById('z-opening-amount').innerText = `S/ ${opening.toFixed(2)}`;
+  document.getElementById('z-cash-sales').innerText = `S/ ${cashSales.toFixed(2)}`;
+  document.getElementById('z-fiado-abonos').innerText = `S/ ${fiadoAbonos.toFixed(2)}`;
+  document.getElementById('z-withdrawals').innerText = `S/ ${withdrawals.toFixed(2)}`;
+
+  document.getElementById('z-card-sales').innerText = `S/ ${cardSales.toFixed(2)}`;
+  document.getElementById('z-transfer-sales').innerText = `S/ ${transferSales.toFixed(2)}`;
+  document.getElementById('z-fiado-sales').innerText = `S/ ${fiadoSales.toFixed(2)}`;
+  document.getElementById('z-total-sales').innerText = `S/ ${totalSales.toFixed(2)}`;
+
+  document.getElementById('z-expected-cash').innerText = `S/ ${expected.toFixed(2)}`;
+  document.getElementById('z-actual-cash').innerText = `S/ ${actual.toFixed(2)}`;
+
+  const diffEl = document.getElementById('z-difference');
+  if (diff === 0) {
+    diffEl.className = 'font-black text-emerald-700';
+    diffEl.innerText = 'S/ 0.00 (Cuadre Exacto)';
+  } else if (diff > 0) {
+    diffEl.className = 'font-black text-blue-700';
+    diffEl.innerText = `+ S/ ${diff.toFixed(2)} (Sobrante)`;
+  } else {
+    diffEl.className = 'font-black text-rose-700';
+    diffEl.innerText = `- S/ ${Math.abs(diff).toFixed(2)} (Faltante)`;
+  }
+
+  document.getElementById('z-notes').innerText = reg.notes && reg.notes.trim() ? reg.notes.trim() : 'Sin observaciones';
+
+  document.getElementById('modal-cierre-z-receipt').classList.remove('hidden');
+}
+
+function closeCierreZModal() {
+  document.getElementById('modal-cierre-z-receipt').classList.add('hidden');
+  focusSearchInput();
 }
 
 // ==========================================
@@ -1313,25 +1404,37 @@ async function processFinalSale() {
 
     playBeep('success');
 
-    // Renderizar Recibo de Impresión Térmica
-    document.getElementById('rec-title').innerText = selectedDocType === 'Ticket' ? 'TICKET DE VENTA' : selectedDocType.toUpperCase() + ' ELECTRÓNICA';
-    document.getElementById('rec-id').innerText = data.receipt_code;
-    document.getElementById('rec-customer').innerText = 'Cliente: ' + customerName;
-    document.getElementById('rec-date').innerText = new Date().toLocaleString();
-    document.getElementById('rec-total').innerText = `S/ ${total.toFixed(2)}`;
-    document.getElementById('rec-method').innerText = selectedPaymentMethod;
-    document.getElementById('rec-paid').innerText = selectedPaymentMethod === 'Fiado' ? 'S/ 0.00 (FIADO)' : `S/ ${paidAmount.toFixed(2)}`;
-    document.getElementById('rec-change').innerText = `S/ ${changeAmount.toFixed(2)}`;
+    // Extraer documento del cliente si aplica
+    let custDoc = '';
+    if (selectedDocType === 'Boleta') {
+      custDoc = (document.getElementById('boleta-dni')?.value || '').trim();
+    } else if (selectedDocType === 'Factura') {
+      custDoc = (document.getElementById('factura-ruc')?.value || '').trim();
+    }
+    if (!custDoc && customerObj && customerObj.doc) {
+      custDoc = customerObj.doc;
+    }
 
-    document.getElementById('rec-items').innerHTML = CART.map(i => `
-      <div class="flex justify-between items-start">
-        <span class="pr-2">${i.quantity}x ${i.product.name}</span>
-        <span class="whitespace-nowrap">S/ ${(i.product.price * i.quantity).toFixed(2)}</span>
-      </div>
-    `).join('');
+    renderTicketModal({
+      docType: selectedDocType,
+      receiptCode: data.receipt_code,
+      customerName: customerName,
+      customerDoc: custDoc,
+      date: new Date(),
+      sellerName: data.sellerName || (currentUser ? currentUser.name : ''),
+      paymentMethod: selectedPaymentMethod,
+      items: CART.map(i => ({
+        product_name: i.product.name,
+        quantity: i.quantity,
+        unit_price: i.product.price,
+        total_price: i.quantity * i.product.price
+      })),
+      total,
+      paidAmount,
+      changeAmount
+    });
 
     closePaymentModal();
-    document.getElementById('modal-receipt').classList.remove('hidden');
 
     clearCart();
     await loadProducts();
@@ -1343,6 +1446,176 @@ async function processFinalSale() {
     playBeep('error');
     alert('❌ Error: ' + err.message);
   }
+}
+
+function renderTicketModal({
+  docType = 'Ticket',
+  receiptCode = 'T001-000000',
+  customerName = 'Público General',
+  customerDoc = '',
+  date = new Date(),
+  sellerName = '',
+  paymentMethod = 'Efectivo',
+  items = [],
+  total = 0,
+  paidAmount = 0,
+  changeAmount = 0
+}) {
+  applyCompanySettingsToTicket();
+
+  document.getElementById('rec-title').innerText = docType === 'Ticket' ? 'TICKET DE VENTA' : docType.toUpperCase() + ' ELECTRÓNICA';
+  document.getElementById('rec-id').innerText = receiptCode;
+  document.getElementById('rec-customer').innerText = 'Cliente: ' + (customerName || 'Público General');
+
+  const docEl = document.getElementById('rec-customer-doc');
+  if (docEl) {
+    if (customerDoc && customerDoc !== '-') {
+      docEl.classList.remove('hidden');
+      docEl.innerText = (docType === 'Factura' ? 'RUC: ' : 'DNI/RUC: ') + customerDoc;
+    } else {
+      docEl.classList.add('hidden');
+    }
+  }
+
+  const sellerEl = document.getElementById('rec-seller');
+  if (sellerEl) {
+    sellerEl.innerText = sellerName ? `Cajero: ${sellerName}` : (currentUser ? `Cajero: ${currentUser.name}` : '');
+  }
+
+  document.getElementById('rec-date').innerText = new Date(date).toLocaleString();
+
+  // Desglose fiscal para Boletas y Facturas
+  const taxBox = document.getElementById('rec-tax-breakdown');
+  const totalLabel = document.getElementById('rec-total-label');
+  const subtotal = total / 1.18;
+  const tax = total - subtotal;
+
+  if (docType === 'Boleta' || docType === 'Factura') {
+    if (taxBox) taxBox.classList.remove('hidden');
+    const subtotalEl = document.getElementById('rec-subtotal');
+    const taxEl = document.getElementById('rec-tax');
+    if (subtotalEl) subtotalEl.innerText = `S/ ${subtotal.toFixed(2)}`;
+    if (taxEl) taxEl.innerText = `S/ ${tax.toFixed(2)}`;
+    if (totalLabel) totalLabel.innerText = 'TOTAL A PAGAR:';
+  } else {
+    if (taxBox) taxBox.classList.add('hidden');
+    if (totalLabel) totalLabel.innerText = 'TOTAL:';
+  }
+
+  document.getElementById('rec-total').innerText = `S/ ${total.toFixed(2)}`;
+  document.getElementById('rec-method').innerText = paymentMethod;
+  document.getElementById('rec-paid').innerText = paymentMethod === 'Fiado' ? 'S/ 0.00 (FIADO)' : `S/ ${paidAmount.toFixed(2)}`;
+  document.getElementById('rec-change').innerText = `S/ ${changeAmount.toFixed(2)}`;
+
+  // TABLA DETALLADA DE ÍTEMS VENDIDOS (CANT | DESCRIPCIÓN | P.UNIT | TOTAL)
+  const itemsContainer = document.getElementById('rec-items');
+  if (itemsContainer) {
+    if (!items || items.length === 0) {
+      itemsContainer.innerHTML = '<p class="text-center text-slate-400 py-2 text-[10px]">Sin productos registrados</p>';
+    } else {
+      itemsContainer.innerHTML = `
+        <table class="w-full text-left text-[11px] leading-tight mb-1">
+          <thead>
+            <tr class="border-b border-slate-300 pb-1 text-[10px] font-black text-slate-700">
+              <th class="py-1 w-8 text-center">CANT</th>
+              <th class="py-1">DESCRIPCION</th>
+              <th class="py-1 text-right w-12">P.U</th>
+              <th class="py-1 text-right w-14">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-dotted divide-slate-200">
+            ${items.map(i => {
+              const qty = i.quantity || 1;
+              const unit = Number(i.unit_price != null ? i.unit_price : (i.price != null ? i.price : (i.total_price ? i.total_price / qty : 0)));
+              const rowTotal = Number(i.total_price != null ? i.total_price : (unit * qty));
+              const name = i.product_name || i.name || 'Producto';
+              return `
+                <tr>
+                  <td class="py-1 text-center font-bold align-top text-slate-800">${qty}</td>
+                  <td class="py-1 pr-1 align-top break-words text-slate-700 font-medium">${name}</td>
+                  <td class="py-1 text-right align-top text-slate-600">${unit.toFixed(2)}</td>
+                  <td class="py-1 text-right font-bold align-top text-slate-900">${rowTotal.toFixed(2)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+  }
+
+  document.getElementById('modal-receipt').classList.remove('hidden');
+}
+
+async function reprintTicket(saleId) {
+  try {
+    const res = await fetch(`/api/sales/${saleId}`, { headers: getAuthHeaders() });
+    const sale = await res.json();
+    if (!res.ok) throw new Error(sale.error || 'Error al obtener comprobante');
+
+    renderTicketModal({
+      docType: sale.doc_type,
+      receiptCode: sale.receipt_code,
+      customerName: sale.customer_name,
+      customerDoc: sale.customer_doc,
+      date: sale.created_at,
+      sellerName: sale.user_name,
+      paymentMethod: sale.payment_method,
+      items: sale.items || [],
+      total: sale.total,
+      paidAmount: sale.paid_amount || sale.total,
+      changeAmount: sale.change_amount || 0
+    });
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error al reimprimir ticket: ' + err.message);
+  }
+}
+
+function reprintAbonoTicket(abonoId) {
+  const abono = currentReportAbonos.find(a => a.id === abonoId);
+  if (!abono) return;
+
+  applyCompanySettingsToTicket();
+
+  document.getElementById('rec-title').innerText = 'COMPROBANTE DE ABONO DE DEUDA';
+  document.getElementById('rec-id').innerText = `AB-${String(abono.id).padStart(5, '0')}`;
+  document.getElementById('rec-customer').innerText = 'Cliente: ' + (abono.customer_name || 'Cliente Registrado');
+  
+  const docEl = document.getElementById('rec-customer-doc');
+  if (docEl) {
+    if (abono.customer_doc && abono.customer_doc !== '-') {
+      docEl.classList.remove('hidden');
+      docEl.innerText = 'DNI/RUC: ' + abono.customer_doc;
+    } else {
+      docEl.classList.add('hidden');
+    }
+  }
+
+  const sellerEl = document.getElementById('rec-seller');
+  if (sellerEl) sellerEl.innerText = `Cajero: ${abono.user_name || 'Sistema'}`;
+
+  document.getElementById('rec-date').innerText = new Date(abono.created_at).toLocaleString();
+
+  const taxBox = document.getElementById('rec-tax-breakdown');
+  if (taxBox) taxBox.classList.add('hidden');
+
+  const totalLabel = document.getElementById('rec-total-label');
+  if (totalLabel) totalLabel.innerText = 'TOTAL ABONADO:';
+
+  document.getElementById('rec-total').innerText = `S/ ${abono.amount.toFixed(2)}`;
+  document.getElementById('rec-method').innerText = 'Abono en Efectivo';
+  document.getElementById('rec-paid').innerText = `S/ ${abono.amount.toFixed(2)}`;
+  document.getElementById('rec-change').innerText = 'S/ 0.00';
+
+  document.getElementById('rec-items').innerHTML = `
+    <div class="flex justify-between items-start font-bold">
+      <span>${abono.details || 'Abono a cuenta corriente (Fiado)'}</span>
+      <span>S/ ${abono.amount.toFixed(2)}</span>
+    </div>
+  `;
+
+  document.getElementById('modal-receipt').classList.remove('hidden');
 }
 
 function closeReceiptModal() {
@@ -1383,7 +1656,7 @@ function renderInventoryTable() {
           ${isLow ? '<span class="ml-2 bg-rose-100 text-rose-700 text-[9px] font-black px-2 py-0.5 rounded">Stock Crítico</span>' : ''}
         </td>
         <td class="p-4"><span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs">${p.category}</span></td>
-        <td class="p-4 text-slate-500">S/ ${(p.purchase_price || 0).toFixed(2)}</td>
+        ${isAdmin ? `<td class="p-4 text-slate-500 font-mono">S/ ${(p.purchase_price || 0).toFixed(2)}</td>` : ''}
         <td class="p-4 font-bold text-slate-900">S/ ${p.price.toFixed(2)}</td>
         <td class="p-4"><span class="${isLow ? 'text-rose-600 bg-rose-100 border border-rose-200' : 'text-emerald-600 bg-emerald-100'} px-2.5 py-1 rounded font-bold text-xs">${p.stock} und.</span></td>
         <td class="p-4 text-center space-x-2">
@@ -1588,11 +1861,39 @@ function renderCRMTable() {
   `).join('');
 }
 
+function setFiadoFilter(filter) {
+  fiadoFilter = filter;
+  document.querySelectorAll('.fiado-filter-btn').forEach(b => {
+    b.classList.remove('bg-amber-600', 'text-white');
+    b.classList.add('bg-slate-200', 'text-slate-700');
+  });
+  const activeBtn = document.getElementById('fiado-filter-' + filter);
+  if (activeBtn) {
+    activeBtn.classList.remove('bg-slate-200', 'text-slate-700');
+    activeBtn.classList.add('bg-amber-600', 'text-white');
+  }
+  renderFiadosTable();
+}
+
 function renderFiadosTable() {
   const query = (document.getElementById('fiado-search-input')?.value || '').toLowerCase().trim();
   const tbody = document.getElementById('fiados-table-body');
+  if (!tbody) return;
 
-  const filtered = CLIENTS.filter(c => c.name.toLowerCase().includes(query) || c.doc.toLowerCase().includes(query));
+  const debtCount = CLIENTS.filter(c => c.debt > 0).length;
+  const badge = document.getElementById('fiado-debt-count');
+  if (badge) badge.innerText = debtCount;
+
+  const filtered = CLIENTS.filter(c => {
+    const matchQuery = c.name.toLowerCase().includes(query) || c.doc.toLowerCase().includes(query);
+    const matchDebt = fiadoFilter === 'all' || (fiadoFilter === 'debt' && c.debt > 0);
+    return matchQuery && matchDebt;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">No se encontraron clientes ${fiadoFilter === 'debt' ? 'con saldos pendientes de pago' : 'registrados'}.</td></tr>`;
+    return;
+  }
 
   tbody.innerHTML = filtered.map(c => `
     <tr class="hover:bg-slate-50">
@@ -1601,7 +1902,7 @@ function renderFiadosTable() {
       <td class="p-4 text-slate-500">${c.phone || '-'}</td>
       <td class="p-4 text-right font-black ${c.debt > 0 ? 'text-amber-600' : 'text-slate-400'}">S/ ${c.debt.toFixed(2)}</td>
       <td class="p-4 text-center">
-        <button onclick="openFiadoModal(${c.id})" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm">
+        <button onclick="openFiadoModal(${c.id})" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors">
           <i class="fa-solid fa-file-invoice-dollar mr-1"></i>Ver / Registrar Abono
         </button>
       </td>
@@ -1649,10 +1950,16 @@ async function saveCustomer(e) {
   }
 }
 
+function setFullAbonoAmount() {
+  if (!currentActiveCustomerForFiado) return;
+  document.getElementById('input-abono-amount').value = (currentActiveCustomerForFiado.debt || 0).toFixed(2);
+}
+
 async function openFiadoModal(customerId) {
   currentActiveCustomerForFiado = CLIENTS.find(c => c.id === customerId);
   if (!currentActiveCustomerForFiado) return;
 
+  const isAdmin = currentUser && currentUser.role === 'Admin';
   document.getElementById('fiado-modal-client-info').innerText = `Cliente: ${currentActiveCustomerForFiado.name} (DNI/RUC: ${currentActiveCustomerForFiado.doc})`;
   document.getElementById('fiado-modal-balance').innerText = `S/ ${currentActiveCustomerForFiado.debt.toFixed(2)}`;
   document.getElementById('input-abono-amount').value = '';
@@ -1663,17 +1970,32 @@ async function openFiadoModal(customerId) {
 
     const historyTbody = document.getElementById('fiado-modal-history');
     if (records.length === 0) {
-      historyTbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Sin historial de fiados ni abonos.</td></tr>`;
+      historyTbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400">Sin historial de fiados ni abonos.</td></tr>`;
     } else {
-      historyTbody.innerHTML = records.map(r => `
-        <tr class="hover:bg-slate-50">
+      historyTbody.innerHTML = records.map(r => {
+        const isAbono = r.type === 'ABONO';
+        const isAnulado = r.details && r.details.includes('[ANULADO]');
+        return `
+        <tr class="hover:bg-slate-50 ${isAnulado ? 'bg-slate-100/50 opacity-60' : ''}">
           <td class="p-3 text-slate-400 text-[11px]">${new Date(r.created_at).toLocaleString()}</td>
-          <td class="p-3"><span class="${r.type === 'ABONO' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'} px-2 py-0.5 rounded font-bold text-[10px]">${r.type}</span></td>
+          <td class="p-3">
+            <span class="${isAbono ? 'bg-emerald-100 text-emerald-800' : (r.type === 'ANULACION_ABONO' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800')} px-2 py-0.5 rounded font-bold text-[10px]">
+              ${r.type}
+            </span>
+          </td>
           <td class="p-3 text-slate-700">${r.details || '-'} (${r.payment_method || 'Efectivo'})</td>
-          <td class="p-3 text-right font-bold ${r.type === 'ABONO' ? 'text-emerald-600' : 'text-slate-800'}">S/ ${r.amount.toFixed(2)}</td>
+          <td class="p-3 text-right font-bold ${isAbono ? 'text-emerald-600' : (r.type === 'ANULACION_ABONO' ? 'text-rose-600' : 'text-slate-800')}">S/ ${r.amount.toFixed(2)}</td>
           <td class="p-3 text-right font-black text-slate-900">S/ ${r.balance_after.toFixed(2)}</td>
+          <td class="p-3 text-center admin-only">
+            ${isAdmin && isAbono && !isAnulado ? `
+              <button onclick="anularAbono(${r.id}, ${customerId})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-2 py-1 rounded text-[10px] transition-colors" title="Anular este abono">
+                <i class="fa-solid fa-trash mr-1"></i>Anular
+              </button>
+            ` : (isAnulado ? '<span class="text-[10px] font-bold text-slate-400">Anulado</span>' : '-')}
+          </td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     document.getElementById('modal-fiado-detail').classList.remove('hidden');
@@ -1687,6 +2009,35 @@ function closeFiadoModal() {
   focusSearchInput();
 }
 
+async function anularAbono(paymentId, customerId) {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede anular abonos.');
+    return;
+  }
+
+  if (!confirm('⚠️ ¿Está seguro de anular este abono? Se restaurará la deuda del cliente y se ajustará el dinero en la caja del turno.')) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/fiados/abono/${paymentId}/anular`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error anulando abono');
+
+    playBeep('success');
+    alert('✅ ' + data.message);
+    await loadCustomers();
+    await loadCurrentCashRegister();
+    await openFiadoModal(customerId);
+  } catch (err) {
+    playBeep('error');
+    alert('❌ ' + err.message);
+  }
+}
+
 async function processAbono() {
   if (!currentActiveCustomerForFiado) return;
   const amount = parseFloat(document.getElementById('input-abono-amount').value);
@@ -1695,6 +2046,12 @@ async function processAbono() {
   if (!amount || amount <= 0) {
     alert('⚠️ Ingrese un monto de abono válido.');
     return;
+  }
+
+  if (amount > currentActiveCustomerForFiado.debt) {
+    if (!confirm(`⚠️ El monto a abonar (S/ ${amount.toFixed(2)}) supera la deuda total actual (S/ ${currentActiveCustomerForFiado.debt.toFixed(2)}). ¿Desea continuar de todos modos?`)) {
+      return;
+    }
   }
 
   try {
@@ -1798,22 +2155,34 @@ function renderSalesHistoryTable(sales = [], abonos = []) {
       <td class="p-4"><span class="${item.isAbono ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : (item.paymentMethod === 'Fiado' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800')} px-2 py-1 rounded text-[10px] font-bold uppercase">${item.paymentMethod}</span></td>
       <td class="p-4 text-right font-black ${item.isAbono ? 'text-emerald-600' : 'text-slate-900'}">S/ ${item.amount.toFixed(2)}</td>
       ${isAdmin ? `<td class="p-4 text-right font-bold text-emerald-600">${item.isAbono ? '-' : 'S/ ' + item.profit.toFixed(2)}</td>` : ''}
-      ${isAdmin ? `
-        <td class="p-4 text-center space-x-1">
-          ${item.isAbono ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Abono Cobrado</span>' : (
-            item.status === 'anulada' 
-              ? '<span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold">Anulada</span>'
-              : `
-                 <button onclick="openEditSaleModal(${item.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Editar datos de venta">
+      <td class="p-4 text-center space-x-1 whitespace-nowrap">
+        ${item.isAbono ? `
+          <button onclick="reprintAbonoTicket(${item.id})" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors shadow-sm" title="Reimprimir Recibo de Abono">
+            <i class="fa-solid fa-print mr-1"></i>Reimprimir
+          </button>
+        ` : (
+          item.status === 'anulada' 
+            ? `
+               <span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold mr-1">Anulada</span>
+               <button onclick="reprintTicket(${item.id})" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-2 py-1.5 rounded-lg text-xs transition-colors" title="Reimprimir Copia de Venta Anulada">
+                 <i class="fa-solid fa-print mr-1"></i>Copia
+               </button>
+              `
+            : `
+               <button onclick="reprintTicket(${item.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors shadow-sm" title="Reimprimir Comprobante de Venta">
+                 <i class="fa-solid fa-print mr-1"></i>Reimprimir
+               </button>
+               ${isAdmin ? `
+                 <button onclick="openEditSaleModal(${item.id})" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Editar datos de venta">
                    <i class="fa-solid fa-pen-to-square mr-1"></i>Editar
                  </button>
                  <button onclick="anularVenta(${item.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors" title="Anular venta">
                    <i class="fa-solid fa-trash mr-1"></i>Anular
                  </button>
-                `
-          )}
-        </td>
-      ` : ''}
+               ` : ''}
+              `
+        )}
+      </td>
     </tr>
   `).join('');
 }
@@ -2058,6 +2427,215 @@ async function processChangePassword(e) {
   } catch (err) {
     playBeep('error');
     alert('❌ Error: ' + err.message);
+  }
+}
+
+// ==========================================
+// 6. DATOS DE LA EMPRESA & BRANDING DE TICKETS
+// ==========================================
+async function loadCompanySettings() {
+  try {
+    const res = await fetch('/api/settings/company');
+    if (res.ok) {
+      COMPANY_SETTINGS = await res.json();
+      applyCompanySettingsToUI();
+    }
+  } catch (e) {
+    console.warn('No se pudo cargar la configuración de la empresa:', e);
+  }
+}
+
+function applyCompanySettingsToUI() {
+  applyCompanySettingsToTicket();
+  applyCompanySettingsToCierreZ();
+  populateCompanySettingsView();
+}
+
+function applyCompanySettingsToTicket() {
+  if (!COMPANY_SETTINGS) return;
+  const nameEl = document.getElementById('rec-company-name');
+  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALE-VENTAS by VALETEC';
+  const rucEl = document.getElementById('rec-company-ruc');
+  if (rucEl) rucEl.innerText = 'RUC: ' + (COMPANY_SETTINGS.ruc || '20123456789');
+  const addrEl = document.getElementById('rec-company-address');
+  if (addrEl) addrEl.innerText = COMPANY_SETTINGS.address || '';
+  const phoneEl = document.getElementById('rec-company-phone');
+  if (phoneEl) phoneEl.innerText = COMPANY_SETTINGS.phone ? `Telf: ${COMPANY_SETTINGS.phone}` : '';
+  const footerEl = document.getElementById('rec-footer-text');
+  if (footerEl) footerEl.innerText = COMPANY_SETTINGS.ticket_footer || '¡Gracias por su preferencia! Vuelva pronto.';
+}
+
+function applyCompanySettingsToCierreZ() {
+  if (!COMPANY_SETTINGS) return;
+  const nameEl = document.getElementById('z-company-name');
+  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALE-VENTAS by VALETEC';
+  const addrEl = document.getElementById('z-company-address');
+  if (addrEl) addrEl.innerText = COMPANY_SETTINGS.address || '';
+  const rucEl = document.getElementById('z-company-ruc');
+  if (rucEl) rucEl.innerText = 'RUC: ' + (COMPANY_SETTINGS.ruc || '20123456789');
+}
+
+function openCompanySettingsModal() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede modificar los datos del negocio.');
+    return;
+  }
+  document.getElementById('setting-company-name').value = COMPANY_SETTINGS?.name || '';
+  document.getElementById('setting-company-ruc').value = COMPANY_SETTINGS?.ruc || '';
+  document.getElementById('setting-company-address').value = COMPANY_SETTINGS?.address || '';
+  document.getElementById('setting-company-phone').value = COMPANY_SETTINGS?.phone || '';
+  document.getElementById('setting-company-footer').value = COMPANY_SETTINGS?.ticket_footer || '';
+  document.getElementById('modal-company-settings').classList.remove('hidden');
+}
+
+function closeCompanySettingsModal() {
+  document.getElementById('modal-company-settings').classList.add('hidden');
+  focusSearchInput();
+}
+
+async function saveCompanySettings(e) {
+  e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado.');
+    return;
+  }
+
+  const payload = {
+    name: document.getElementById('setting-company-name').value.trim(),
+    ruc: document.getElementById('setting-company-ruc').value.trim(),
+    address: document.getElementById('setting-company-address').value.trim(),
+    phone: document.getElementById('setting-company-phone').value.trim(),
+    ticket_footer: document.getElementById('setting-company-footer').value.trim()
+  };
+
+  try {
+    const res = await fetch('/api/settings/company', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error guardando datos');
+
+    COMPANY_SETTINGS = data.settings;
+    applyCompanySettingsToUI();
+    closeCompanySettingsModal();
+    playBeep('success');
+    alert('✅ Datos del negocio y tickets guardados correctamente.');
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
+}
+
+function populateCompanySettingsView() {
+  if (!COMPANY_SETTINGS) return;
+  const nameInput = document.getElementById('setting-company-name-view');
+  if (nameInput) nameInput.value = COMPANY_SETTINGS.name || '';
+  const rucInput = document.getElementById('setting-company-ruc-view');
+  if (rucInput) rucInput.value = COMPANY_SETTINGS.ruc || '';
+  const addrInput = document.getElementById('setting-company-address-view');
+  if (addrInput) addrInput.value = COMPANY_SETTINGS.address || '';
+  const phoneInput = document.getElementById('setting-company-phone-view');
+  if (phoneInput) phoneInput.value = COMPANY_SETTINGS.phone || '';
+  const footerInput = document.getElementById('setting-company-footer-view');
+  if (footerInput) footerInput.value = COMPANY_SETTINGS.ticket_footer || '';
+  syncCompanyPreview();
+}
+
+function syncCompanyPreview() {
+  const name = document.getElementById('setting-company-name-view')?.value.trim() || 'MI BODEGA';
+  const ruc = document.getElementById('setting-company-ruc-view')?.value.trim() || '20123456789';
+  const addr = document.getElementById('setting-company-address-view')?.value.trim() || 'Av. Principal 123';
+  const phone = document.getElementById('setting-company-phone-view')?.value.trim() || '987654321';
+  const footer = document.getElementById('setting-company-footer-view')?.value.trim() || '¡Gracias por su preferencia!';
+
+  const pName = document.getElementById('prev-company-name');
+  if (pName) pName.innerText = name;
+  const pRuc = document.getElementById('prev-company-ruc');
+  if (pRuc) pRuc.innerText = 'RUC: ' + ruc;
+  const pAddr = document.getElementById('prev-company-address');
+  if (pAddr) pAddr.innerText = addr;
+  const pPhone = document.getElementById('prev-company-phone');
+  if (pPhone) pPhone.innerText = phone ? `Telf: ${phone}` : '';
+  const pFooter = document.getElementById('prev-company-footer');
+  if (pFooter) pFooter.innerText = footer;
+}
+
+async function saveCompanySettingsFromView(e) {
+  e.preventDefault();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Permiso denegado. Solo administradores pueden modificar los datos del negocio.');
+    return;
+  }
+
+  const payload = {
+    name: document.getElementById('setting-company-name-view').value.trim(),
+    ruc: document.getElementById('setting-company-ruc-view').value.trim(),
+    address: document.getElementById('setting-company-address-view').value.trim(),
+    phone: document.getElementById('setting-company-phone-view').value.trim(),
+    ticket_footer: document.getElementById('setting-company-footer-view').value.trim()
+  };
+
+  try {
+    const res = await fetch('/api/settings/company', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error guardando datos');
+
+    COMPANY_SETTINGS = data.settings;
+    applyCompanySettingsToUI();
+    playBeep('success');
+    alert('✅ Datos de la empresa y configuración de tickets actualizados correctamente.');
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error: ' + err.message);
+  }
+}
+
+// ==========================================
+// 7. COPIA DE SEGURIDAD (BACKUP) DE BASE DE DATOS EN 1 CLIC
+// ==========================================
+async function downloadBackup() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede descargar copias de seguridad.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/backup/download', { headers: getAuthHeaders() });
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Error al descargar copia de seguridad');
+    }
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    
+    // Extraer nombre del archivo si vino en cabeceras
+    const disposition = res.headers.get('content-disposition');
+    let filename = 'valeventas_backup.json';
+    if (disposition && disposition.indexOf('filename=') !== -1) {
+      const matches = /filename="([^"]+)"/.exec(disposition);
+      if (matches && matches[1]) filename = matches[1];
+    }
+    
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    playBeep('success');
+    alert('✅ Copia de seguridad descargada exitosamente.');
+  } catch (err) {
+    playBeep('error');
+    alert('❌ Error descargando backup: ' + err.message);
   }
 }
 

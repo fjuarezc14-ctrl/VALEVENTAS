@@ -797,6 +797,63 @@ app.put('/api/sales/:id', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// OBTENER DETALLE DE UNA VENTA PARA REIMPRESIÓN (Admin o Cajero)
+app.get('/api/sales/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const saleRes = await db.query(`
+      SELECT 
+        s.id, 
+        s.receipt_code, 
+        s.doc_type, 
+        s.customer_id,
+        s.customer_name, 
+        s.payment_method, 
+        s.user_id,
+        COALESCE(s.user_name, 'Sistema') AS user_name,
+        s.cash_register_id,
+        s.total::float AS total,
+        s.subtotal::float AS subtotal,
+        s.tax::float AS tax,
+        s.paid_amount::float AS paid_amount,
+        s.change_amount::float AS change_amount,
+        COALESCE(s.mixed_cash, 0)::float AS mixed_cash,
+        COALESCE(s.mixed_other, 0)::float AS mixed_other,
+        s.status, 
+        s.created_at,
+        c.doc AS customer_doc
+      FROM sales s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.id = $1
+    `, [id]);
+
+    if (saleRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Venta no encontrada.' });
+    }
+
+    const sale = saleRes.rows[0];
+    const itemsRes = await db.query(`
+      SELECT 
+        id, 
+        product_id, 
+        product_name, 
+        quantity, 
+        unit_price::float AS unit_price, 
+        total_price::float AS total_price
+      FROM sale_items 
+      WHERE sale_id = $1 
+      ORDER BY id ASC
+    `, [id]);
+
+    sale.items = itemsRes.rows;
+    res.json(sale);
+
+  } catch (err) {
+    console.error('❌ Error obteniendo venta para reimpresión:', err.message);
+    res.status(500).json({ error: 'Error al consultar comprobante de venta.' });
+  }
+});
+
 // ANULAR VENTA (Solo Administrador)
 app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
@@ -805,7 +862,21 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
   try {
     await client.query('BEGIN');
 
-    const saleRes = await client.query('SELECT id, receipt_code, total::float, customer_id, payment_method, status FROM sales WHERE id = $1 FOR UPDATE', [id]);
+    const saleRes = await client.query(`
+      SELECT 
+        id, 
+        receipt_code, 
+        total::float, 
+        customer_id, 
+        payment_method, 
+        status, 
+        cash_register_id,
+        COALESCE(mixed_cash, 0)::float AS mixed_cash,
+        COALESCE(mixed_other, 0)::float AS mixed_other
+      FROM sales 
+      WHERE id = $1 
+      FOR UPDATE
+    `, [id]);
     const sale = saleRes.rows[0];
 
     if (!sale || sale.status === 'anulada') {
@@ -813,6 +884,7 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
       return res.status(400).json({ error: 'Venta no encontrada o ya anulada.' });
     }
 
+    // 1. Devolver stock al inventario
     const itemsRes = await client.query('SELECT product_id, product_name, quantity FROM sale_items WHERE sale_id = $1', [id]);
     for (const item of itemsRes.rows) {
       if (item.product_id) {
@@ -820,6 +892,7 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
       }
     }
 
+    // 2. Revertir impacto si fue Fiado
     if (sale.payment_method === 'Fiado' && sale.customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [sale.customer_id]);
       const newDebt = Math.max(0, custRes.rows[0].debt - sale.total);
@@ -830,6 +903,40 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
       `, [sale.customer_id, sale.total, 'Anulación de venta #' + id, newDebt]);
     }
 
+    // 3. Ajuste contable en Caja Activa (Evita descuadre en Arqueo Z)
+    let targetRegister = null;
+    if (sale.cash_register_id) {
+      const regRes = await client.query("SELECT * FROM cash_registers WHERE id = $1 AND status = 'abierta' FOR UPDATE", [sale.cash_register_id]);
+      if (regRes.rows.length > 0) targetRegister = regRes.rows[0];
+    }
+    
+    // Si no tenía cash_register_id o no coincidió, buscar la caja actualmente abierta
+    if (!targetRegister) {
+      const activeRegRes = await client.query("SELECT * FROM cash_registers WHERE status = 'abierta' ORDER BY id DESC LIMIT 1 FOR UPDATE");
+      if (activeRegRes.rows.length > 0) targetRegister = activeRegRes.rows[0];
+    }
+
+    if (targetRegister) {
+      if (sale.payment_method === 'Efectivo') {
+        await client.query("UPDATE cash_registers SET cash_sales = GREATEST(0, cash_sales - $1) WHERE id = $2", [sale.total, targetRegister.id]);
+      } else if (sale.payment_method === 'Tarjeta') {
+        await client.query("UPDATE cash_registers SET card_sales = GREATEST(0, card_sales - $1) WHERE id = $2", [sale.total, targetRegister.id]);
+      } else if (sale.payment_method === 'Yape/Plin') {
+        await client.query("UPDATE cash_registers SET transfer_sales = GREATEST(0, transfer_sales - $1) WHERE id = $2", [sale.total, targetRegister.id]);
+      } else if (sale.payment_method === 'Fiado') {
+        await client.query("UPDATE cash_registers SET fiado_sales = GREATEST(0, fiado_sales - $1) WHERE id = $2", [sale.total, targetRegister.id]);
+      } else if (sale.payment_method === 'Pago Mixto') {
+        await client.query("UPDATE cash_registers SET cash_sales = GREATEST(0, cash_sales - $1), transfer_sales = GREATEST(0, transfer_sales - $2) WHERE id = $3", [sale.mixed_cash, sale.mixed_other, targetRegister.id]);
+      }
+
+      // Recalcular saldo esperado de caja en gaveta
+      await client.query(`
+        UPDATE cash_registers 
+        SET expected_cash = opening_amount + cash_sales + COALESCE(fiado_abonos, 0) - COALESCE(total_withdrawals, 0) 
+        WHERE id = $1
+      `, [targetRegister.id]);
+    }
+
     await client.query("UPDATE sales SET status = 'anulada' WHERE id = $1", [id]);
     await client.query('COMMIT');
 
@@ -837,8 +944,9 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
     io.emit('products_changed');
     io.emit('sales_changed');
     io.emit('cash_register_changed');
+    if (sale.payment_method === 'Fiado') io.emit('customers_changed');
 
-    res.json({ success: true, message: 'Venta anulada correctamente', receipt_code: sale.receipt_code });
+    res.json({ success: true, message: 'Venta anulada correctamente e importe descontado de caja', receipt_code: sale.receipt_code });
 
   } catch (err) {
     await client.query('ROLLBACK');
@@ -902,11 +1010,31 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
       }
     }
 
-    // 2. Correlativo de Ticket
-    const prefix = doc_type === 'Factura' ? 'F' : (doc_type === 'Boleta' ? 'B' : 'T');
-    const countRes = await client.query('SELECT COUNT(id) FROM sales WHERE doc_type = $1', [doc_type || 'Ticket']);
-    const nextNum = parseInt(countRes.rows[0].count) + 1;
-    const receipt_code = `${prefix}001-${String(nextNum).padStart(6, '0')}`;
+    // 2. Correlativo de Ticket Seguro y Atómico (Resistente a concurrencia y huecos)
+    const docTypeFinal = doc_type || 'Ticket';
+    const prefix = docTypeFinal === 'Factura' ? 'F' : (docTypeFinal === 'Boleta' ? 'B' : 'T');
+
+    // Bloqueo consultivo por tipo de documento para serializar la asignación bajo concurrencia
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('sales_correlativo_' || $1))", [docTypeFinal]);
+
+    const maxRes = await client.query(`
+      SELECT COALESCE(MAX(
+        CAST(SUBSTRING(receipt_code FROM '-([0-9]+)$') AS INTEGER)
+      ), 0) AS max_num
+      FROM sales
+      WHERE doc_type = $1
+    `, [docTypeFinal]);
+
+    let nextNum = parseInt(maxRes.rows[0].max_num) + 1;
+    let receipt_code = `${prefix}001-${String(nextNum).padStart(6, '0')}`;
+
+    // Verificación defensiva contra duplicados
+    while (true) {
+      const existsCheck = await client.query('SELECT id FROM sales WHERE receipt_code = $1', [receipt_code]);
+      if (existsCheck.rows.length === 0) break;
+      nextNum++;
+      receipt_code = `${prefix}001-${String(nextNum).padStart(6, '0')}`;
+    }
 
     // 3. Insertar Venta con auditoría de vendedor y caja
     const sellerId = req.user.id;
@@ -1060,6 +1188,77 @@ app.post('/api/fiados/abono', authMiddleware, async (req, res) => {
   }
 });
 
+// ANULAR ABONO DE DEUDA (Solo Administrador)
+app.post('/api/fiados/abono/:id/anular', authMiddleware, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const client = await db.pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const paymentRes = await client.query('SELECT id, customer_id, type, amount::float, payment_method, details FROM fiado_payments WHERE id = $1 FOR UPDATE', [id]);
+    const payment = paymentRes.rows[0];
+
+    if (!payment || payment.type !== 'ABONO') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'El registro no existe o no es un abono válido para anular.' });
+    }
+
+    if (payment.details && payment.details.includes('[ANULADO]')) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Este abono ya se encuentra anulado.' });
+    }
+
+    const custRes = await client.query('SELECT debt::float, name FROM customers WHERE id = $1 FOR UPDATE', [payment.customer_id]);
+    const customer = custRes.rows[0];
+    if (!customer) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cliente no encontrado.' });
+    }
+
+    // 1. Restaurar la deuda del cliente
+    const restoredDebt = customer.debt + payment.amount;
+    await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [restoredDebt, payment.customer_id]);
+
+    // 2. Registrar el movimiento de anulación en el historial
+    await client.query(`
+      INSERT INTO fiado_payments (customer_id, user_id, user_name, type, payment_method, amount, details, balance_after)
+      VALUES ($1, $2, $3, 'ANULACION_ABONO', $4, $5, $6, $7)
+    `, [payment.customer_id, req.user.id, req.user.name, payment.payment_method, payment.amount, `Anulación de Abono #${payment.id}`, restoredDebt]);
+
+    // 3. Revertir el dinero de la caja del turno si sigue abierta
+    if (payment.payment_method === 'Efectivo') {
+      await client.query("UPDATE cash_registers SET fiado_abonos = GREATEST(0, COALESCE(fiado_abonos, 0) - $1) WHERE status = 'abierta'", [payment.amount]);
+    } else if (payment.payment_method === 'Tarjeta') {
+      await client.query("UPDATE cash_registers SET card_sales = GREATEST(0, card_sales - $1) WHERE status = 'abierta'", [payment.amount]);
+    } else if (payment.payment_method === 'Yape/Plin') {
+      await client.query("UPDATE cash_registers SET transfer_sales = GREATEST(0, transfer_sales - $1) WHERE status = 'abierta'", [payment.amount]);
+    }
+
+    // 4. Marcar el abono original como anulado
+    await client.query("UPDATE fiado_payments SET details = details || ' [ANULADO]' WHERE id = $1", [id]);
+
+    await client.query('COMMIT');
+
+    io.emit('customers_changed');
+    io.emit('cash_register_changed');
+
+    res.json({
+      success: true,
+      message: `Abono #${id} por S/ ${payment.amount.toFixed(2)} anulado correctamente. Deuda restaurada a S/ ${restoredDebt.toFixed(2)}`,
+      restoredDebt
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error anulando abono:', err.message);
+    res.status(500).json({ error: 'Error anulando abono: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
 // ==========================================
 // 7. GESTIÓN DE USUARIOS Y ROLES (ADMIN ONLY)
 // ==========================================
@@ -1111,6 +1310,140 @@ app.put('/api/users/:id/password', authMiddleware, adminOnly, async (req, res) =
   } catch (err) {
     console.error('❌ Error actualizando contraseña:', err.message);
     res.status(500).json({ error: 'Error al cambiar la contraseña del usuario.' });
+  }
+});
+
+// ==========================================
+// 8. CONFIGURACIÓN DEL NEGOCIO / BRANDING DE TICKETS
+// ==========================================
+app.get('/api/settings/company', async (req, res) => {
+  try {
+    const result = await db.query('SELECT * FROM company_settings WHERE id = 1');
+    if (result.rows.length === 0) {
+      return res.json({
+        id: 1,
+        name: 'VALE-VENTAS by VALETEC',
+        ruc: '20123456789',
+        address: 'Av. Principal 123 - Lima, Perú',
+        phone: '987654321',
+        ticket_footer: '¡Gracias por su preferencia! Vuelva pronto.'
+      });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('❌ Error obteniendo datos de la empresa:', err.message);
+    res.status(500).json({ error: 'Error consultando datos de la empresa.' });
+  }
+});
+
+app.put('/api/settings/company', authMiddleware, adminOnly, async (req, res) => {
+  const { name, ruc, address, phone, ticket_footer } = req.body;
+  if (!name || !ruc) {
+    return res.status(400).json({ error: 'El Nombre del Negocio y el RUC son obligatorios.' });
+  }
+
+  try {
+    const query = `
+      INSERT INTO company_settings (id, name, ruc, address, phone, ticket_footer, updated_at)
+      VALUES (1, $1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        ruc = EXCLUDED.ruc,
+        address = EXCLUDED.address,
+        phone = EXCLUDED.phone,
+        ticket_footer = EXCLUDED.ticket_footer,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+    const result = await db.query(query, [
+      name.trim(),
+      ruc.trim(),
+      (address || '').trim(),
+      (phone || '').trim(),
+      (ticket_footer || '¡Gracias por su preferencia! Vuelva pronto.').trim()
+    ]);
+
+    const updated = result.rows[0];
+    io.emit('settings_changed', updated);
+
+    res.json({ success: true, message: 'Datos de la empresa actualizados correctamente', settings: updated });
+  } catch (err) {
+    console.error('❌ Error actualizando datos de la empresa:', err.message);
+    res.status(500).json({ error: 'Error al actualizar configuración de la empresa.' });
+  }
+});
+
+// ==========================================
+// 9. COPIA DE SEGURIDAD (BACKUP) DE BASE DE DATOS EN 1 CLIC
+// ==========================================
+app.get('/api/backup/download', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    console.log(`📦 Generando copia de seguridad solicitada por ${req.user.name}...`);
+    const [
+      settings,
+      users,
+      products,
+      customers,
+      sales,
+      saleItems,
+      cashRegisters,
+      cashMovements,
+      fiadoPayments,
+      stockMovements
+    ] = await Promise.all([
+      db.query('SELECT * FROM company_settings'),
+      db.query('SELECT id, username, name, role, plain_password, created_at FROM users'),
+      db.query('SELECT * FROM products ORDER BY id ASC'),
+      db.query('SELECT * FROM customers ORDER BY id ASC'),
+      db.query('SELECT * FROM sales ORDER BY id ASC'),
+      db.query('SELECT * FROM sale_items ORDER BY id ASC'),
+      db.query('SELECT * FROM cash_registers ORDER BY id ASC'),
+      db.query('SELECT * FROM cash_movements ORDER BY id ASC'),
+      db.query('SELECT * FROM fiado_payments ORDER BY id ASC'),
+      db.query('SELECT * FROM stock_movements ORDER BY id ASC')
+    ]);
+
+    const backupData = {
+      system: 'VALEVENTAS POS by VT VALETEC',
+      version: '2.0',
+      exported_at: new Date().toISOString(),
+      exported_by: {
+        id: req.user.id,
+        name: req.user.name,
+        username: req.user.username
+      },
+      counts: {
+        products: products.rows.length,
+        customers: customers.rows.length,
+        sales: sales.rows.length,
+        cash_registers: cashRegisters.rows.length
+      },
+      data: {
+        company_settings: settings.rows,
+        users: users.rows,
+        products: products.rows,
+        customers: customers.rows,
+        sales: sales.rows,
+        sale_items: saleItems.rows,
+        cash_registers: cashRegisters.rows,
+        cash_movements: cashMovements.rows,
+        fiado_payments: fiadoPayments.rows,
+        stock_movements: stockMovements.rows
+      }
+    };
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+    const fileName = `valeventas_backup_${dateStr}.json`;
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(JSON.stringify(backupData, null, 2));
+
+  } catch (err) {
+    console.error('❌ Error generando copia de seguridad:', err.message);
+    res.status(500).json({ error: 'Error al generar la copia de seguridad: ' + err.message });
   }
 });
 
