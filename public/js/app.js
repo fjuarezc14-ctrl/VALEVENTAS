@@ -2491,7 +2491,7 @@ function applyCompanySettingsToUI() {
 function applyCompanySettingsToTicket() {
   if (!COMPANY_SETTINGS) return;
   const nameEl = document.getElementById('rec-company-name');
-  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALE-VENTAS by VALETEC';
+  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALEVENTAS';
   const rucEl = document.getElementById('rec-company-ruc');
   if (rucEl) rucEl.innerText = 'RUC: ' + (COMPANY_SETTINGS.ruc || '20123456789');
   const addrEl = document.getElementById('rec-company-address');
@@ -2505,7 +2505,7 @@ function applyCompanySettingsToTicket() {
 function applyCompanySettingsToCierreZ() {
   if (!COMPANY_SETTINGS) return;
   const nameEl = document.getElementById('z-company-name');
-  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALE-VENTAS by VALETEC';
+  if (nameEl) nameEl.innerText = COMPANY_SETTINGS.name || 'VALEVENTAS';
   const addrEl = document.getElementById('z-company-address');
   if (addrEl) addrEl.innerText = COMPANY_SETTINGS.address || '';
   const rucEl = document.getElementById('z-company-ruc');
