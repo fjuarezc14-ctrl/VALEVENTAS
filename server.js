@@ -414,7 +414,7 @@ app.post('/api/customers', authMiddleware, async (req, res) => {
 // ==========================================
 // 4. MÓDULO DE CIERRE DE CAJA DIARIO (ARQUEO Z)
 // ==========================================
-app.get('/api/cash-register/current', async (req, res) => {
+app.get('/api/cash-register/current', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(`
       SELECT 
