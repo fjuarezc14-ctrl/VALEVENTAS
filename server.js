@@ -42,7 +42,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Manejo de Conexiones WebSocket en Tiempo Real
 io.on('connection', (socket) => {
   console.log(`🔌 Cliente WebSocket conectado (ID: ${socket.id})`);
-  
+
   socket.on('disconnect', () => {
     console.log(`🔌 Cliente WebSocket desconectado (ID: ${socket.id})`);
   });
@@ -246,7 +246,7 @@ app.put('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
       WHERE id = $8
     `;
     await db.query(query, [code, name, category, purchase_price, price, stock, min_stock, id]);
-    
+
     // Emitir evento en tiempo real
     io.emit('products_changed');
 
@@ -358,7 +358,7 @@ app.delete('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
   try {
     await db.query('DELETE FROM products WHERE id = $1', [id]);
-    
+
     // Emitir evento en tiempo real
     io.emit('products_changed');
 
@@ -398,7 +398,7 @@ app.post('/api/customers', authMiddleware, async (req, res) => {
       RETURNING id, doc, name, phone, address, debt::float
     `;
     const result = await db.query(query, [doc, name, phone || '', address || '']);
-    
+
     io.emit('customers_changed');
 
     res.json(result.rows[0]);
@@ -476,7 +476,7 @@ app.post('/api/cash-register/open', authMiddleware, async (req, res) => {
       RETURNING *
     `;
     const result = await db.query(query, [req.user.id, req.user.name, initialAmt]);
-    
+
     io.emit('cash_register_changed');
 
     res.json(result.rows[0]);
@@ -556,10 +556,10 @@ app.post('/api/cash-register/close', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'No hay ninguna caja abierta para cerrar.' });
     }
 
-    const expectedCash = (parseFloat(activeRegister.opening_amount) || 0) + 
-                         (parseFloat(activeRegister.cash_sales) || 0) + 
-                         (parseFloat(activeRegister.fiado_abonos) || 0) - 
-                         (parseFloat(activeRegister.total_withdrawals) || 0);
+    const expectedCash = (parseFloat(activeRegister.opening_amount) || 0) +
+      (parseFloat(activeRegister.cash_sales) || 0) +
+      (parseFloat(activeRegister.fiado_abonos) || 0) -
+      (parseFloat(activeRegister.total_withdrawals) || 0);
     const difference = actualAmt - expectedCash;
 
     const updateQuery = `
@@ -576,7 +576,7 @@ app.post('/api/cash-register/close', authMiddleware, async (req, res) => {
     `;
 
     const result = await db.query(updateQuery, [expectedCash, actualAmt, difference, notes || '', activeRegister.id]);
-    
+
     io.emit('cash_register_changed');
 
     res.json({ success: true, message: 'Cierre Z completado correctamente', register: result.rows[0] });
@@ -756,7 +756,7 @@ app.put('/api/sales/:id', authMiddleware, adminOnly, async (req, res) => {
 
     // Si cambió el método de pago a/desde FIADO, ajustar la deuda del cliente
     const oldTotal = parseFloat(oldSale.total);
-    
+
     // 1. Revertir impacto de la antigua venta fiada si la había
     if (oldSale.payment_method === 'Fiado' && oldSale.customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [oldSale.customer_id]);
@@ -921,7 +921,7 @@ app.put('/api/sales/:id/anular', authMiddleware, adminOnly, async (req, res) => 
       const regRes = await client.query("SELECT * FROM cash_registers WHERE id = $1 AND status = 'abierta' FOR UPDATE", [sale.cash_register_id]);
       if (regRes.rows.length > 0) targetRegister = regRes.rows[0];
     }
-    
+
     // Si no tenía cash_register_id o no coincidió, buscar la caja actualmente abierta
     if (!targetRegister) {
       const activeRegRes = await client.query("SELECT * FROM cash_registers WHERE status = 'abierta' ORDER BY id DESC LIMIT 1 FOR UPDATE");
@@ -1083,7 +1083,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
       const newDebt = Math.round(((custRes.rows[0] ? custRes.rows[0].debt : 0) + total) * 100) / 100;
       const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ');
 
-      await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [customer_id, newDebt]);
+      await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, customer_id]);
       await client.query(`
         INSERT INTO fiado_payments (customer_id, user_id, user_name, type, payment_method, amount, details, balance_after)
         VALUES ($1, $2, $3, 'COMPRA_FIADA', 'Fiado', $4, $5, $6)
@@ -1450,7 +1450,7 @@ app.get('/api/backup/download', authMiddleware, adminOnly, async (req, res) => {
 
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+    const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
     const fileName = `valeventas_backup_${dateStr}.json`;
 
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

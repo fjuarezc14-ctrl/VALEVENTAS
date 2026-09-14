@@ -257,7 +257,7 @@ function switchTab(tabId) {
   closeMobileSidebar();
 
   document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-  
+
   const targetView = document.getElementById('view-' + tabId);
   if (targetView) targetView.classList.remove('hidden');
 
@@ -322,7 +322,7 @@ function playBeep(type = 'success') {
       osc.start();
       osc.stop(ctx.currentTime + 0.2);
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 // ==========================================
@@ -539,7 +539,7 @@ async function openCloseCashRegisterModal() {
     } else {
       listEl.innerHTML = abonosList.map(a => `
         <tr class="hover:bg-slate-50">
-          <td class="p-2 text-slate-400 text-[10px]">${new Date(a.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+          <td class="p-2 text-slate-400 text-[10px]">${new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
           <td class="p-2 font-bold text-slate-800">${a.customer_name}</td>
           <td class="p-2 text-slate-600">${a.user_name}</td>
           <td class="p-2 text-right font-black text-emerald-600">S/ ${a.amount.toFixed(2)}</td>
@@ -739,7 +739,7 @@ async function loadSalesHistory() {
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.summary) return;
-    
+
     currentReportSales = Array.isArray(data.sales) ? data.sales : [];
     currentReportAbonos = Array.isArray(data.abonos) ? data.abonos : [];
 
@@ -768,7 +768,7 @@ function setReportPreset(preset) {
   const startEl = document.getElementById('rep-start-date');
   const endEl = document.getElementById('rep-end-date');
   const today = new Date();
-  
+
   const formatDate = (d) => d.toISOString().split('T')[0];
 
   if (preset === 'today') {
@@ -837,7 +837,7 @@ function exportSalesToCSV() {
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  
+
   const link = document.createElement('a');
   link.setAttribute('href', url);
   link.setAttribute('download', `Reporte_Ventas_VALEVENTAS_${new Date().toISOString().split('T')[0]}.csv`);
@@ -866,10 +866,9 @@ async function loadUsers() {
 function renderCategoryFilters() {
   const categories = ['Todos', ...new Set(PRODUCTS.map(p => p.category))];
   const container = document.getElementById('category-filters');
-  
+
   container.innerHTML = categories.map(cat => `
-    <button onclick="setCategory('${cat}')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-      activeCategory === cat ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+    <button onclick="setCategory('${cat}')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${activeCategory === cat ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
     }">
       ${cat}
     </button>
@@ -945,7 +944,7 @@ function handleSearchKeyDown(e) {
 
   const targetQuery = codeQuery.toLowerCase();
   let found = PRODUCTS.find(p => p.code.toLowerCase() === targetQuery);
-  
+
   if (!found) {
     found = PRODUCTS.find(p => p.name.toLowerCase() === targetQuery);
   }
@@ -1088,8 +1087,15 @@ function populateCustomerDropdown() {
   const select = document.getElementById('modal-select-customer');
   const editSelect = document.getElementById('edit-sale-customer');
 
-  const optionsHTML = '<option value="">Público General</option>' + 
-    CLIENTS.map(c => `<option value="${c.id}">${c.name} (${c.doc}) ${c.debt > 0 ? '- Deuda: S/ ' + c.debt.toFixed(2) : ''}</option>`).join('');
+  const optionsHTML =
+    '<option value="">Público General</option>' +
+    CLIENTS.map(c => {
+      const debt = Number(c.debt || 0);
+
+      return `<option value="${c.id}">
+        ${c.name} (${c.doc})${debt > 0 ? ` - Deuda: S/ ${debt.toFixed(2)}` : ''}
+      </option>`;
+    }).join('');
 
   if (select) select.innerHTML = optionsHTML;
   if (editSelect) editSelect.innerHTML = optionsHTML;
@@ -1120,7 +1126,7 @@ function renderCustomerSearchResults(query = '') {
   const container = document.getElementById('cust-search-results');
   if (!container) return;
 
-  const filtered = CLIENTS.filter(c => 
+  const filtered = CLIENTS.filter(c =>
     c.name.toLowerCase().includes(query) || (c.doc && c.doc.toLowerCase().includes(query))
   );
 
@@ -1203,7 +1209,7 @@ function openPaymentModal() {
   document.getElementById('input-paid-amount').value = total.toFixed(2);
   calculateChange();
   document.getElementById('modal-payment').classList.remove('hidden');
-  
+
   setTimeout(() => {
     const inputPaid = document.getElementById('input-paid-amount');
     if (inputPaid) {
@@ -1546,11 +1552,11 @@ function renderTicketModal({
           </thead>
           <tbody class="divide-y divide-dotted divide-slate-200">
             ${items.map(i => {
-              const qty = i.quantity || 1;
-              const unit = Number(i.unit_price != null ? i.unit_price : (i.price != null ? i.price : (i.total_price ? i.total_price / qty : 0)));
-              const rowTotal = Number(i.total_price != null ? i.total_price : (unit * qty));
-              const name = i.product_name || i.name || 'Producto';
-              return `
+        const qty = i.quantity || 1;
+        const unit = Number(i.unit_price != null ? i.unit_price : (i.price != null ? i.price : (i.total_price ? i.total_price / qty : 0)));
+        const rowTotal = Number(i.total_price != null ? i.total_price : (unit * qty));
+        const name = i.product_name || i.name || 'Producto';
+        return `
                 <tr>
                   <td class="py-1 text-center font-bold align-top text-slate-800">${qty}</td>
                   <td class="py-1 pr-1 align-top break-words text-slate-700 font-medium">${name}</td>
@@ -1558,7 +1564,7 @@ function renderTicketModal({
                   <td class="py-1 text-right font-bold align-top text-slate-900">${rowTotal.toFixed(2)}</td>
                 </tr>
               `;
-            }).join('')}
+      }).join('')}
           </tbody>
         </table>
       `;
@@ -1602,7 +1608,7 @@ function reprintAbonoTicket(abonoId) {
   document.getElementById('rec-title').innerText = 'COMPROBANTE DE ABONO DE DEUDA';
   document.getElementById('rec-id').innerText = `AB-${String(abono.id).padStart(5, '0')}`;
   document.getElementById('rec-customer').innerText = 'Cliente: ' + (abono.customer_name || 'Cliente Registrado');
-  
+
   const docEl = document.getElementById('rec-customer-doc');
   if (docEl) {
     if (abono.customer_doc && abono.customer_doc !== '-') {
@@ -1659,7 +1665,7 @@ function renderInventoryTable() {
   const query = (document.getElementById('inventory-search')?.value || '').toLowerCase().trim();
   const tbody = document.getElementById('inventory-table-body');
   const isAdmin = currentUser && currentUser.role === 'Admin';
-  
+
   const filtered = PRODUCTS.filter(p => {
     const matchQuery = p.name.toLowerCase().includes(query) || p.code.toLowerCase().includes(query);
     const isLow = p.stock <= (p.min_stock || 5);
@@ -1795,12 +1801,175 @@ async function loadKardexMovements() {
   }
 }
 
+// ==========================================
+// PLANTILLAS DE PRODUCTOS RÁPIDOS Y AUTOCOMPLETADO
+// ==========================================
+const PRODUCT_PRESETS = [
+  { code: '7750123001', name: 'Arroz Superior Costeño 1kg', category: 'Abarrotes', purchase_price: 3.80, price: 4.50, stock: 24, min_stock: 6 },
+  { code: '7750123002', name: 'Aceite Vegetal Primor 1L', category: 'Abarrotes', purchase_price: 7.20, price: 8.90, stock: 20, min_stock: 5 },
+  { code: '7750123003', name: 'Azúcar Rubia Cartavio 1kg', category: 'Abarrotes', purchase_price: 3.20, price: 4.00, stock: 30, min_stock: 8 },
+  { code: '7750123004', name: 'Leche Evaporada Gloria Azul 400g', category: 'Lácteos', purchase_price: 3.60, price: 4.50, stock: 48, min_stock: 12 },
+  { code: '7750123005', name: 'Gaseosa Coca Cola 500ml', category: 'Bebidas', purchase_price: 2.20, price: 3.00, stock: 36, min_stock: 10 },
+  { code: '7750123006', name: 'Gaseosa Inca Kola 500ml', category: 'Bebidas', purchase_price: 2.20, price: 3.00, stock: 36, min_stock: 10 },
+  { code: '7750123007', name: 'Gaseosa Coca Cola 1.5L', category: 'Bebidas', purchase_price: 5.50, price: 7.50, stock: 18, min_stock: 4 },
+  { code: '7750123008', name: 'Gaseosa Inca Kola 1.5L', category: 'Bebidas', purchase_price: 5.50, price: 7.50, stock: 18, min_stock: 4 },
+  { code: '7750123009', name: 'Agua San Mateo sin Gas 600ml', category: 'Bebidas', purchase_price: 1.20, price: 2.00, stock: 30, min_stock: 6 },
+  { code: '7750123010', name: 'Atún Trozos en Aceite Fanny 170g', category: 'Abarrotes', purchase_price: 4.10, price: 5.50, stock: 24, min_stock: 6 },
+  { code: '7750123011', name: 'Fideos Spaguetti Don Vittorio 500g', category: 'Abarrotes', purchase_price: 2.30, price: 3.20, stock: 30, min_stock: 6 },
+  { code: '7750123012', name: 'Huevos Pardos Granja (1kg)', category: 'Abarrotes', purchase_price: 7.50, price: 9.50, stock: 15, min_stock: 3 },
+  { code: '7750123013', name: 'Pan Francés Bolsa (10 unds)', category: 'Panadería', purchase_price: 2.00, price: 3.00, stock: 20, min_stock: 5 },
+  { code: '7750123014', name: 'Detergente Bolívar Floral 800g', category: 'Limpieza', purchase_price: 6.80, price: 8.50, stock: 15, min_stock: 4 },
+  { code: '7750123015', name: 'Jabón Bolívar Blanco 210g', category: 'Limpieza', purchase_price: 2.80, price: 3.80, stock: 24, min_stock: 6 },
+  { code: '7750123016', name: 'Lejía Clorox Tradicional 930ml', category: 'Limpieza', purchase_price: 3.20, price: 4.50, stock: 20, min_stock: 5 },
+  { code: '7750123017', name: 'Lavavajillas Ayudín Limón 450g', category: 'Limpieza', purchase_price: 4.20, price: 5.60, stock: 18, min_stock: 4 },
+  { code: '7750123018', name: 'Papel Higiénico Suave Doble Hoja 4un', category: 'Limpieza', purchase_price: 4.80, price: 6.50, stock: 24, min_stock: 6 },
+  { code: '7750123019', name: 'Galletas Soda Field Paquete 6un', category: 'Snacks', purchase_price: 2.80, price: 3.80, stock: 30, min_stock: 6 },
+  { code: '7750123020', name: 'Chocolate Sublime Extragrande 40g', category: 'Snacks', purchase_price: 1.80, price: 2.50, stock: 40, min_stock: 10 },
+  { code: '7750123021', name: 'Papas Lays Clásicas 160g', category: 'Snacks', purchase_price: 4.80, price: 6.50, stock: 15, min_stock: 4 },
+  { code: '7750123022', name: 'Yogur Gloria Fresa 1L', category: 'Lácteos', purchase_price: 5.60, price: 7.20, stock: 16, min_stock: 4 },
+  { code: '7750123023', name: 'Café Nescafé Tradicional 100g', category: 'Abarrotes', purchase_price: 9.80, price: 12.80, stock: 15, min_stock: 4 },
+  { code: '7750123024', name: 'Cerveza Cusqueña Dorada 330ml', category: 'Bebidas', purchase_price: 4.20, price: 6.00, stock: 24, min_stock: 6 },
+  { code: '7750123025', name: 'Cerveza Pilsen Callao 330ml', category: 'Bebidas', purchase_price: 3.80, price: 5.50, stock: 24, min_stock: 6 },
+  { code: '7750123026', name: 'Crema Dental Kolynos 75ml', category: 'Cuidado Personal', purchase_price: 3.20, price: 4.50, stock: 20, min_stock: 5 },
+  { code: '7750123027', name: 'Shampoo Head & Shoulders 375ml', category: 'Cuidado Personal', purchase_price: 14.50, price: 18.90, stock: 12, min_stock: 3 },
+  { code: '7750123028', name: 'Pack Familiar: 2 Gaseosas 1.5L + Snack', category: 'Promociones/Combos', purchase_price: 13.50, price: 18.50, stock: 10, min_stock: 2 }
+];
+
+let currentPresetCategory = 'Todos';
+
+function renderProductPresets(query = '') {
+  const container = document.getElementById('product-presets-list');
+  if (!container) return;
+
+  const q = query.toLowerCase().trim();
+  const filtered = PRODUCT_PRESETS.filter(p => {
+    const matchCat = currentPresetCategory === 'Todos' || p.category === currentPresetCategory;
+    const matchText = !q || p.name.toLowerCase().includes(q) || p.code.includes(q) || p.category.toLowerCase().includes(q);
+    return matchCat && matchText;
+  });
+
+  const badge = document.getElementById('preset-count-badge');
+  if (badge) badge.innerText = `${filtered.length} plantillas`;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-6 text-slate-400">
+        <i class="fa-solid fa-magnifying-glass text-2xl mb-1 text-slate-300"></i>
+        <p class="text-xs font-semibold">No se encontraron plantillas coincidentes.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map(p => {
+    const isAlreadyRegistered = PRODUCTS && PRODUCTS.some(prod => prod.code === p.code);
+    return `
+      <div onclick='autofillProductForm(${JSON.stringify(p)})' class="group p-2.5 bg-white hover:bg-blue-50/70 border border-slate-200 hover:border-blue-400 rounded-xl cursor-pointer transition-all shadow-sm hover:shadow flex items-center justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-xs font-black text-slate-800 group-hover:text-blue-700 truncate leading-tight">${p.name}</span>
+            <span class="text-[9px] bg-slate-100 group-hover:bg-blue-100 text-slate-600 group-hover:text-blue-800 px-1.5 py-0.5 rounded font-bold">${p.category}</span>
+            ${isAlreadyRegistered ? '<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">En catálogo</span>' : ''}
+          </div>
+          <div class="flex items-center gap-3 mt-1 text-[10px] text-slate-500 font-mono">
+            <span><i class="fa-solid fa-barcode text-slate-400 mr-0.5"></i>${p.code}</span>
+            <span>Costo: <strong class="text-slate-700 font-sans">S/ ${p.purchase_price.toFixed(2)}</strong></span>
+            <span>Venta: <strong class="text-emerald-700 font-sans font-bold">S/ ${p.price.toFixed(2)}</strong></span>
+          </div>
+        </div>
+        <button type="button" class="shrink-0 bg-blue-50 group-hover:bg-blue-600 text-blue-600 group-hover:text-white w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors" title="Usar esta plantilla">
+          <i class="fa-solid fa-arrow-left"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterProductPresets() {
+  const q = document.getElementById('preset-search-input')?.value || '';
+  renderProductPresets(q);
+}
+
+function setPresetCategoryFilter(cat) {
+  currentPresetCategory = cat;
+  document.querySelectorAll('.preset-chip').forEach(btn => {
+    if (btn.innerText.trim() === cat) {
+      btn.className = 'preset-chip bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors';
+    } else {
+      btn.className = 'preset-chip bg-white hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors';
+    }
+  });
+  filterProductPresets();
+}
+
+function autofillProductForm(preset) {
+  if (!preset) return;
+
+  // Si el código ya existe en los productos de la tienda, sugerir un SKU único basado en el código
+  let finalCode = preset.code;
+  if (PRODUCTS && PRODUCTS.some(p => p.code === finalCode)) {
+    finalCode = generateUniqueSKU(preset.code);
+  }
+
+  document.getElementById('prod-code').value = finalCode;
+  document.getElementById('prod-name').value = preset.name;
+  document.getElementById('prod-category').value = preset.category;
+  document.getElementById('prod-stock').value = preset.stock || 10;
+  document.getElementById('prod-purchase').value = (preset.purchase_price || 0).toFixed(2);
+  document.getElementById('prod-price').value = (preset.price || 0).toFixed(2);
+  document.getElementById('prod-min-stock').value = preset.min_stock || 5;
+
+  // Notificación visual de autocompletado
+  const alertEl = document.getElementById('autofill-alert');
+  const alertText = document.getElementById('autofill-alert-text');
+  if (alertEl && alertText) {
+    alertText.innerHTML = `Plantilla aplicada: <strong>${preset.name}</strong>`;
+    alertEl.classList.remove('hidden');
+    clearTimeout(window._autofillAlertTimer);
+    window._autofillAlertTimer = setTimeout(() => {
+      alertEl.classList.add('hidden');
+    }, 3500);
+  }
+
+  // Enfocar en precio de venta para revisión
+  const priceInput = document.getElementById('prod-price');
+  if (priceInput) {
+    priceInput.focus();
+    priceInput.select();
+  }
+}
+
+function generateRandomSKU() {
+  const randomNum = Math.floor(1000000 + Math.random() * 9000000);
+  const sku = `775${randomNum}`;
+  document.getElementById('prod-code').value = sku;
+}
+
+function generateUniqueSKU(baseCode = '') {
+  let candidate = `${baseCode || '77501'}-${String(Math.floor(100 + Math.random() * 900))}`;
+  let attempts = 0;
+  while (PRODUCTS && PRODUCTS.some(p => p.code === candidate) && attempts < 20) {
+    candidate = `${baseCode || '77501'}-${String(Math.floor(100 + Math.random() * 900))}`;
+    attempts++;
+  }
+  return candidate;
+}
+
 function openProductModal() {
   if (!currentUser || currentUser.role !== 'Admin') {
     alert('⚠️ Solo el Administrador puede registrar o modificar productos.');
     return;
   }
   document.getElementById('form-product').reset();
+  const alertEl = document.getElementById('autofill-alert');
+  if (alertEl) alertEl.classList.add('hidden');
+  const presetSearch = document.getElementById('preset-search-input');
+  if (presetSearch) presetSearch.value = '';
+  currentPresetCategory = 'Todos';
+  document.querySelectorAll('.preset-chip').forEach(btn => {
+    btn.className = btn.innerText.trim() === 'Todos' ? 'preset-chip bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors' : 'preset-chip bg-white hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors';
+  });
+  renderProductPresets();
   document.getElementById('modal-product').classList.remove('hidden');
 }
 
@@ -2198,14 +2367,14 @@ function renderSalesHistoryTable(sales = [], abonos = []) {
             <i class="fa-solid fa-print mr-1"></i>Reimprimir
           </button>
         ` : (
-          item.status === 'anulada' 
-            ? `
+      item.status === 'anulada'
+        ? `
                <span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-[10px] font-bold mr-1">Anulada</span>
                <button onclick="reprintTicket(${item.id})" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-2 py-1.5 rounded-lg text-xs transition-colors" title="Reimprimir Copia de Venta Anulada">
                  <i class="fa-solid fa-print mr-1"></i>Copia
                </button>
               `
-            : `
+        : `
                <button onclick="reprintTicket(${item.id})" class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-2.5 py-1.5 rounded-lg text-xs transition-colors shadow-sm" title="Reimprimir Comprobante de Venta">
                  <i class="fa-solid fa-print mr-1"></i>Reimprimir
                </button>
@@ -2218,7 +2387,7 @@ function renderSalesHistoryTable(sales = [], abonos = []) {
                  </button>
                ` : ''}
               `
-        )}
+    )}
       </td>
     </tr>
   `).join('');
@@ -2653,7 +2822,7 @@ async function downloadBackup() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    
+
     // Extraer nombre del archivo si vino en cabeceras
     const disposition = res.headers.get('content-disposition');
     let filename = 'valeventas_backup.json';
@@ -2661,7 +2830,7 @@ async function downloadBackup() {
       const matches = /filename="([^"]+)"/.exec(disposition);
       if (matches && matches[1]) filename = matches[1];
     }
-    
+
     a.download = filename;
     document.body.appendChild(a);
     a.click();
