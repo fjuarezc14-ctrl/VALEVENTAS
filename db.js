@@ -34,6 +34,24 @@ async function initDb(retries = 8, delay = 2000) {
 
   try {
 
+    // 0. CATEGORÍAS INDEPENDIENTES
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO categories (name) VALUES 
+        ('Abarrotes'), ('Bebidas'), ('Lácteos'), ('Limpieza'), ('Snacks'), 
+        ('Panadería'), ('Cuidado Personal'), ('Promociones/Combos')
+      ON CONFLICT (name) DO NOTHING;
+
+      INSERT INTO categories (name) 
+      SELECT DISTINCT category FROM products 
+      WHERE category IS NOT NULL AND TRIM(category) != '' 
+      ON CONFLICT (name) DO NOTHING;
+    `);
+
     // 1. PRODUCTOS
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
@@ -69,13 +87,12 @@ async function initDb(retries = 8, delay = 2000) {
         id SERIAL PRIMARY KEY,
         username VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        plain_password VARCHAR(255) DEFAULT '',
         name VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL DEFAULT 'Cajero',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS plain_password VARCHAR(255) DEFAULT '';"); } catch(e){}
+    try { await pool.query("ALTER TABLE users DROP COLUMN IF EXISTS plain_password;"); } catch(e){}
 
     // 7. ARQUEO Y CIERRE DE CAJA DIARIO (TURNO Z)
     await pool.query(`
@@ -167,9 +184,10 @@ async function initDb(retries = 8, delay = 2000) {
         payment_method VARCHAR(50) DEFAULT 'Efectivo',
         amount NUMERIC(10,2) NOT NULL,
         balance_after NUMERIC(10,2) NOT NULL,
-        details VARCHAR(255) DEFAULT '',
+        details TEXT DEFAULT '',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE fiado_payments ALTER COLUMN details TYPE TEXT;
       ALTER TABLE fiado_payments ADD COLUMN IF NOT EXISTS user_id INT;
       ALTER TABLE fiado_payments ADD COLUMN IF NOT EXISTS user_name VARCHAR(255) DEFAULT 'Sistema';
       ALTER TABLE fiado_payments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'Efectivo';
@@ -270,13 +288,10 @@ async function seedInitialData() {
     if (parseInt(resUsers.rows[0].count) === 0) {
       console.log('🌱 Sembrando usuarios con contraseñas hacheadas bcrypt...');
       await pool.query(`
-        INSERT INTO users (username, password, plain_password, name, role) VALUES
-        ('admin', $1, 'admin123', 'Administrador Principal', 'Admin'),
-        ('cajero', $2, 'cajero123', 'Cajero Turno Mañana', 'Cajero');
+        INSERT INTO users (username, password, name, role) VALUES
+        ('admin', $1, 'Administrador Principal', 'Admin'),
+        ('cajero', $2, 'Cajero Turno Mañana', 'Cajero');
       `, [adminPassHash, cajeroPassHash]);
-    } else {
-      await pool.query("UPDATE users SET password = $1, plain_password = 'admin123' WHERE username = $2 AND (plain_password IS NULL OR plain_password = '');", [adminPassHash, 'admin']);
-      await pool.query("UPDATE users SET password = $1, plain_password = 'cajero123' WHERE username = $2 AND (plain_password IS NULL OR plain_password = '');", [cajeroPassHash, 'cajero']);
     }
   } catch (err) {
     console.error('❌ Error sembrando datos iniciales:', err.message);

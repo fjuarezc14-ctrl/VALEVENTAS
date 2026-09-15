@@ -34,7 +34,15 @@ const loginLimiter = rateLimit({
   legacyHeaders: false
 });
 
+app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -172,6 +180,72 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
 // ==========================================
 // 2. PRODUCTOS (INVENTARIO)
 // ==========================================
+// ==========================================
+// MÓDULO MAESTRO DE CATEGORÍAS INDEPENDIENTES
+// ==========================================
+app.get('/api/categories', async (req, res) => {
+  try {
+    const result = await db.query('SELECT id, name, created_at FROM categories ORDER BY name ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('❌ Error obteniendo categorías:', err.message);
+    res.status(500).json({ error: 'Error al consultar categorías.' });
+  }
+});
+
+app.post('/api/categories', authMiddleware, adminOnly, async (req, res) => {
+  const { name } = req.body;
+  const cleanName = (name || '').trim();
+  if (!cleanName) {
+    return res.status(400).json({ error: 'El nombre de la categoría es obligatorio.' });
+  }
+
+  try {
+    const check = await db.query('SELECT id FROM categories WHERE LOWER(name) = LOWER($1)', [cleanName]);
+    if (check.rows.length > 0) {
+      return res.status(400).json({ error: `La categoría "${cleanName}" ya existe.` });
+    }
+
+    const result = await db.query(
+      'INSERT INTO categories (name) VALUES ($1) RETURNING id, name, created_at',
+      [cleanName]
+    );
+
+    io.emit('categories_changed');
+    res.json({ success: true, message: 'Categoría creada con éxito.', category: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Error creando categoría:', err.message);
+    res.status(500).json({ error: 'Error al registrar la categoría.' });
+  }
+});
+
+app.delete('/api/categories/:id', authMiddleware, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const catRes = await db.query('SELECT id, name FROM categories WHERE id = $1', [id]);
+    if (catRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Categoría no encontrada.' });
+    }
+    const catName = catRes.rows[0].name;
+
+    // Verificar si hay productos asociados a esta categoría
+    const prodCountRes = await db.query('SELECT COUNT(*) FROM products WHERE category = $1', [catName]);
+    const prodCount = parseInt(prodCountRes.rows[0].count);
+    if (prodCount > 0) {
+      return res.status(400).json({
+        error: `No se puede eliminar la categoría "${catName}" porque tiene ${prodCount} producto(s) asignado(s). Modifica o reasigna los productos primero.`
+      });
+    }
+
+    await db.query('DELETE FROM categories WHERE id = $1', [id]);
+    io.emit('categories_changed');
+    res.json({ success: true, message: `Categoría "${catName}" eliminada correctamente.` });
+  } catch (err) {
+    console.error('❌ Error eliminando categoría:', err.message);
+    res.status(500).json({ error: 'Error al eliminar la categoría.' });
+  }
+});
+
 app.get('/api/products', async (req, res) => {
   try {
     const result = await db.query(`
@@ -225,8 +299,13 @@ app.post('/api/products', authMiddleware, adminOnly, async (req, res) => {
       `, [result.rows[0].id, name, parseInt(stock), code, req.user?.id || null, req.user?.name || 'Administrador']);
     }
 
+    if (category && category.trim()) {
+      await db.query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [category.trim()]);
+    }
+
     // Emitir evento de cambio en inventario a todos los POS conectados
     io.emit('products_changed');
+    io.emit('categories_changed');
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -354,6 +433,39 @@ app.get('/api/inventory/movements', authMiddleware, async (req, res) => {
   }
 });
 
+// CARGA MASIVA DE CATÁLOGO BASE (Solo Administrador)
+app.post('/api/products/bulk', authMiddleware, adminOnly, async (req, res) => {
+  const { products } = req.body;
+  if (!products || !Array.isArray(products) || products.length === 0) {
+    return res.status(400).json({ error: 'Debe enviar un array de productos.' });
+  }
+
+  const client = await db.pool.connect();
+  let inserted = 0, skipped = 0;
+  try {
+    await client.query('BEGIN');
+    for (const p of products) {
+      if (!p.code || !p.name || !p.price) { skipped++; continue; }
+      const exists = await client.query('SELECT id FROM products WHERE code = $1', [p.code]);
+      if (exists.rows.length > 0) { skipped++; continue; }
+      await client.query(
+        `INSERT INTO products (code, name, category, purchase_price, price, stock, min_stock) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [p.code, p.name, p.category || 'Abarrotes', p.purchase_price || 0, p.price, p.stock || 10, p.min_stock || 5]
+      );
+      inserted++;
+    }
+    await client.query('COMMIT');
+    io.emit('products_changed');
+    res.json({ success: true, message: `✅ ${inserted} productos cargados, ${skipped} omitidos (duplicados o inválidos).`, inserted, skipped });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error en carga masiva:', err.message);
+    res.status(500).json({ error: 'Error en carga masiva: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.delete('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
   try {
@@ -457,6 +569,52 @@ app.get('/api/cash-register/current', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('❌ Error obteniendo caja actual:', err.message);
     res.status(500).json({ error: 'Error obteniendo estado de caja.' });
+  }
+});
+
+// HISTORIAL DE TURNOS / CAJAS CERRADAS (Admin y Cajeros)
+app.get('/api/cash-registers/history', authMiddleware, async (req, res) => {
+  const { startDate, endDate, userId } = req.query;
+  try {
+    let conditions = [];
+    let params = [];
+    let idx = 1;
+
+    if (req.user.role !== 'Admin') {
+      conditions.push(`cr.user_id = $${idx}`);
+      params.push(req.user.id);
+      idx++;
+    } else if (userId && userId !== 'Todos') {
+      conditions.push(`cr.user_id = $${idx}`);
+      params.push(parseInt(userId));
+      idx++;
+    }
+
+    if (startDate) { conditions.push(`DATE(cr.opened_at) >= $${idx}`); params.push(startDate); idx++; }
+    if (endDate) { conditions.push(`DATE(COALESCE(cr.closed_at, cr.opened_at)) <= $${idx}`); params.push(endDate); idx++; }
+
+    const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    const result = await db.query(`
+      SELECT 
+        cr.id, cr.user_id, cr.user_name, 
+        cr.opening_amount::float, cr.cash_sales::float, cr.card_sales::float, 
+        cr.transfer_sales::float, cr.fiado_sales::float, 
+        COALESCE(cr.fiado_abonos,0)::float AS fiado_abonos,
+        COALESCE(cr.total_withdrawals,0)::float AS total_withdrawals,
+        cr.expected_cash::float, cr.actual_cash::float, cr.difference::float,
+        cr.status, cr.opened_at, cr.closed_at, cr.notes,
+        (SELECT COUNT(*) FROM sales s WHERE s.cash_register_id = cr.id AND s.status = 'completada') AS tickets_count
+      FROM cash_registers cr
+      ${where}
+      ORDER BY cr.id DESC
+      LIMIT 100
+    `, params);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('❌ Error obteniendo historial de cajas:', err.message);
+    res.status(500).json({ error: 'Error al consultar historial de turnos.' });
   }
 });
 
@@ -671,7 +829,7 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
 
     let totalSales = 0;
     let totalProfit = 0;
-    let breakdown = { cash: 0, card: 0, transfer: 0, fiado: 0, fiadoAbonos: 0 };
+    let breakdown = { cash: 0, card: 0, transfer: 0, fiado: 0, fiadoAbonos: 0, cortesia: 0 };
 
     sales.forEach(s => {
       totalSales += s.total;
@@ -681,6 +839,7 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
       else if (s.payment_method === 'Tarjeta') breakdown.card += s.total;
       else if (s.payment_method === 'Yape/Plin') breakdown.transfer += s.total;
       else if (s.payment_method === 'Fiado') breakdown.fiado += s.total;
+      else if (s.payment_method === 'Cortesia') breakdown.cortesia += s.total;
       else if (s.payment_method === 'Pago Mixto') {
         breakdown.cash += (parseFloat(s.mixed_cash) || 0);
         breakdown.transfer += (parseFloat(s.mixed_other) || 0);
@@ -700,6 +859,35 @@ app.get('/api/sales', authMiddleware, async (req, res) => {
     if (endDate) {
       abonoConditions.push(`DATE(fp.created_at) <= $${abonoIdx}`);
       abonoParams.push(endDate);
+      abonoIdx++;
+    }
+
+    if (userId && userId !== 'Todos') {
+      abonoConditions.push(`fp.user_id = $${abonoIdx}`);
+      abonoParams.push(parseInt(userId));
+      abonoIdx++;
+    }
+
+    // Los abonos no corresponden a comprobantes específicos (Ticket, Boleta, Factura)
+    if (docType && docType !== 'Todos') {
+      abonoConditions.push("1 = 0");
+    }
+
+    // Los abonos son cobros en efectivo por defecto
+    if (paymentMethod && paymentMethod !== 'Todos' && paymentMethod !== 'Efectivo') {
+      abonoConditions.push("1 = 0");
+    }
+
+    if (q && q.trim()) {
+      const searchPattern = `%${q.trim().toLowerCase()}%`;
+      abonoConditions.push(`(
+        LOWER(COALESCE(c.name, '')) LIKE $${abonoIdx} OR 
+        LOWER(COALESCE(c.doc, '')) LIKE $${abonoIdx} OR 
+        LOWER(COALESCE(fp.user_name, '')) LIKE $${abonoIdx} OR 
+        LOWER('ab-' || LPAD(fp.id::text, 5, '0')) LIKE $${abonoIdx} OR
+        LOWER('ab-' || fp.id::text) LIKE $${abonoIdx}
+      )`);
+      abonoParams.push(searchPattern);
       abonoIdx++;
     }
 
@@ -1070,10 +1258,12 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
 
       if (item.product_id) {
         await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [item.quantity, item.product_id]);
+        const movType = payment_method === 'Cortesia' ? 'CORTESIA' : 'VENTA';
+        const movNotes = payment_method === 'Cortesia' ? 'Salida por cortesía / degustación en POS' : 'Salida por venta en POS';
         await client.query(`
           INSERT INTO stock_movements (product_id, product_name, quantity, type, doc_type, doc_number, supplier_notes, user_id, user_name)
-          VALUES ($1, $2, $3, 'VENTA', $4, $5, 'Salida por venta en POS', $6, $7)
-        `, [item.product_id, item.product_name, item.quantity, docTypeFinal, receipt_code, sellerId, sellerName]);
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [item.product_id, item.product_name, item.quantity, movType, docTypeFinal, receipt_code, movNotes, sellerId, sellerName]);
       }
     }
 
@@ -1081,7 +1271,7 @@ app.post('/api/sales', authMiddleware, async (req, res) => {
     if (payment_method === 'Fiado' && customer_id) {
       const custRes = await client.query('SELECT debt::float FROM customers WHERE id = $1 FOR UPDATE', [customer_id]);
       const newDebt = Math.round(((custRes.rows[0] ? custRes.rows[0].debt : 0) + total) * 100) / 100;
-      const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ');
+      const details = items.map(i => `${i.quantity}x ${i.product_name}`).join(', ').substring(0, 500);
 
       await client.query('UPDATE customers SET debt = $1 WHERE id = $2', [newDebt, customer_id]);
       await client.query(`
@@ -1280,7 +1470,7 @@ app.post('/api/fiados/abono/:id/anular', authMiddleware, adminOnly, async (req, 
 // ==========================================
 app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const result = await db.query('SELECT id, username, name, role, plain_password, created_at FROM users ORDER BY id ASC');
+    const result = await db.query('SELECT id, username, name, role, created_at FROM users ORDER BY id ASC');
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Error obteniendo usuarios:', err.message);
@@ -1296,13 +1486,12 @@ app.post('/api/users', authMiddleware, adminOnly, async (req, res) => {
 
   try {
     const passHash = bcrypt.hashSync(password.trim(), 10);
-    const plainPass = password.trim();
     const query = `
-      INSERT INTO users (username, password, plain_password, name, role)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, username, name, role, plain_password, created_at
+      INSERT INTO users (username, password, name, role)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, username, name, role, created_at
     `;
-    const result = await db.query(query, [username.trim(), passHash, plainPass, name.trim(), role]);
+    const result = await db.query(query, [username.trim(), passHash, name.trim(), role]);
     res.json({ success: true, user: result.rows[0] });
   } catch (err) {
     console.error('❌ Error creando usuario:', err.message);
@@ -1320,8 +1509,7 @@ app.put('/api/users/:id/password', authMiddleware, adminOnly, async (req, res) =
 
   try {
     const passHash = bcrypt.hashSync(newPassword.trim(), 10);
-    const plainPass = newPassword.trim();
-    await db.query('UPDATE users SET password = $1, plain_password = $2 WHERE id = $3', [passHash, plainPass, id]);
+    await db.query('UPDATE users SET password = $1 WHERE id = $2', [passHash, id]);
     res.json({ success: true, message: 'Contraseña actualizada correctamente' });
   } catch (err) {
     console.error('❌ Error actualizando contraseña:', err.message);
@@ -1408,7 +1596,7 @@ app.get('/api/backup/download', authMiddleware, adminOnly, async (req, res) => {
       stockMovements
     ] = await Promise.all([
       db.query('SELECT * FROM company_settings'),
-      db.query('SELECT id, username, name, role, plain_password, created_at FROM users'),
+      db.query('SELECT id, username, name, role, created_at FROM users'),
       db.query('SELECT * FROM products ORDER BY id ASC'),
       db.query('SELECT * FROM customers ORDER BY id ASC'),
       db.query('SELECT * FROM sales ORDER BY id ASC'),

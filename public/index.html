@@ -371,6 +371,19 @@
             <i class="fa-solid fa-boxes-stacked text-blue-600"></i> Gestión de Inventario
           </h2>
           <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+            <button onclick="confirmBulkCatalogLoad()"
+              class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-colors admin-only" title="Cargar 28 productos esenciales peruanos con stock inicial">
+              <i class="fa-solid fa-boxes-packing text-emerald-200"></i> Cargar Catálogo Base
+            </button>
+            <button onclick="openManageCategoriesModal()"
+              class="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:from-indigo-700 hover:to-purple-800 text-white px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5 active:translate-y-0 border border-indigo-400/30 admin-only group"
+              title="Crear, editar y organizar categorías de productos">
+              <span class="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center text-xs group-hover:rotate-12 transition-transform shadow-inner">
+                <i class="fa-solid fa-tags text-white"></i>
+              </span>
+              <span>Categorías</span>
+              <span id="badge-categories-count" class="bg-white/25 text-white text-[11px] px-2 py-0.5 rounded-full font-black border border-white/20 shadow-sm">0</span>
+            </button>
             <button onclick="openKardexModal()"
               class="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-colors">
               <i class="fa-solid fa-clipboard-list text-amber-400"></i> Kardex / Movimientos
@@ -384,15 +397,19 @@
 
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div
-            class="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+            class="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
             <input type="text" id="inventory-search" oninput="renderInventoryTable()"
               placeholder="Buscar producto en almacén..."
               class="flex-1 px-4 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm focus:outline-none focus:border-blue-500">
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2 items-center">
+              <select id="inventory-category-filter" onchange="renderInventoryTable()"
+                class="px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold bg-white text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 shadow-sm">
+                <option value="all">Todas las Categorías</option>
+              </select>
               <button id="inv-filter-all" onclick="setInventoryFilter('all')"
-                class="inv-filter-btn bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm flex-1 sm:flex-initial">Todos</button>
+                class="inv-filter-btn bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-sm flex-1 sm:flex-initial">Todos</button>
               <button id="inv-filter-low" onclick="setInventoryFilter('low')"
-                class="inv-filter-btn bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-300 flex-1 sm:flex-initial">⚠️
+                class="inv-filter-btn bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold hover:bg-slate-300 flex-1 sm:flex-initial">⚠️
                 Stock Crítico</button>
             </div>
           </div>
@@ -496,14 +513,29 @@
       <div class="max-w-6xl mx-auto w-full space-y-4 sm:space-y-6">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <h2 class="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-2">
-            <i class="fa-solid fa-chart-line text-blue-600"></i> Reportes y Análisis de Ventas
+            <i class="fa-solid fa-chart-line text-blue-600"></i> Reportes y Análisis
           </h2>
-          <button onclick="exportSalesToCSV()"
-            class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-colors admin-only">
-            <i class="fa-solid fa-file-excel text-sm"></i> Exportar a Excel (CSV)
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <button onclick="exportSalesToCSV()" id="btn-export-sales"
+              class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-colors admin-only">
+              <i class="fa-solid fa-file-excel text-sm"></i> Exportar Ventas (Excel)
+            </button>
+          </div>
+        </div>
+
+        <!-- PESTAÑAS SUB-VISTA: VENTAS VS TURNOS -->
+        <div class="flex gap-2 border-b border-slate-200 pb-2">
+          <button type="button" onclick="switchReportSubTab('sales')" id="btn-subtab-sales"
+            class="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-receipt"></i> Ventas y Comprobantes
+          </button>
+          <button type="button" onclick="switchReportSubTab('shifts')" id="btn-subtab-shifts"
+            class="px-4 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-cash-register text-amber-500"></i> Reporte de Cajeros por Turno
           </button>
         </div>
 
+        <div id="rep-subview-sales" class="space-y-4 sm:space-y-6">
         <!-- BARRA DE FILTROS AVANZADOS -->
         <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 sm:space-y-4">
           <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
@@ -552,6 +584,7 @@
                 <option value="Tarjeta">Tarjeta</option>
                 <option value="Yape/Plin">Yape/Plin</option>
                 <option value="Fiado">Fiado</option>
+                <option value="Cortesia">Cortesía</option>
               </select>
             </div>
             <div>
@@ -634,6 +667,63 @@
             </table>
           </div>
         </div>
+      </div> <!-- Fin rep-subview-sales -->
+
+      <!-- SUB-VISTA: HISTORIAL Y REPORTE DE TURNOS DE CAJEROS -->
+      <div id="rep-subview-shifts" class="hidden space-y-4 sm:space-y-6">
+          <!-- FILTROS DE TURNOS -->
+          <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="text-[10px] sm:text-[11px] font-bold text-slate-500 block mb-1">Cajero / Responsable</label>
+                <select id="shift-filter-user" onchange="loadShiftsHistory()"
+                  class="w-full p-2 border border-slate-300 rounded-xl text-xs font-semibold">
+                  <option value="Todos">Todos los Cajeros</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-[10px] sm:text-[11px] font-bold text-slate-500 block mb-1">Desde Fecha</label>
+                <input type="date" id="shift-start-date" onchange="loadShiftsHistory()"
+                  class="w-full p-2 border border-slate-300 rounded-xl text-xs font-semibold">
+              </div>
+              <div>
+                <label class="text-[10px] sm:text-[11px] font-bold text-slate-500 block mb-1">Hasta Fecha</label>
+                <input type="date" id="shift-end-date" onchange="loadShiftsHistory()"
+                  class="w-full p-2 border border-slate-300 rounded-xl text-xs font-semibold">
+              </div>
+            </div>
+          </div>
+
+          <!-- TABLA DE TURNOS -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 class="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-2">
+                <i class="fa-solid fa-clock-rotate-left text-amber-500"></i> Turnos Registrados (Aperturas y Cierres)
+              </h3>
+              <span id="shifts-count-badge" class="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-0.5 rounded-full">0 Turnos</span>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar">
+              <table class="w-full text-left text-xs sm:text-sm text-slate-600 min-w-[850px]">
+                <thead class="bg-slate-100 text-slate-500 font-bold uppercase text-[10px] sm:text-xs">
+                  <tr>
+                    <th class="p-3 sm:p-4">Turno</th>
+                    <th class="p-3 sm:p-4">Cajero</th>
+                    <th class="p-3 sm:p-4">Apertura</th>
+                    <th class="p-3 sm:p-4">Cierre</th>
+                    <th class="p-3 sm:p-4 text-right">M. Inicial</th>
+                    <th class="p-3 sm:p-4 text-right">Ventas Efec.</th>
+                    <th class="p-3 sm:p-4 text-right">Esperado</th>
+                    <th class="p-3 sm:p-4 text-right">Real Caja</th>
+                    <th class="p-3 sm:p-4 text-center">Diferencia</th>
+                    <th class="p-3 sm:p-4 text-center">Estado</th>
+                    <th class="p-3 sm:p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="shifts-table-body" class="divide-y divide-slate-100 font-medium"></tbody>
+              </table>
+            </div>
+          </div>
+        </div> <!-- Fin rep-subview-shifts -->
       </div>
     </section>
 
@@ -661,7 +751,6 @@
                   <th class="p-3 sm:p-4">Usuario</th>
                   <th class="p-3 sm:p-4">Nombre Completo</th>
                   <th class="p-3 sm:p-4">Rol</th>
-                  <th class="p-3 sm:p-4">Contraseña (Admin)</th>
                   <th class="p-3 sm:p-4 text-center">Estado</th>
                   <th class="p-3 sm:p-4 text-center">Acciones</th>
                 </tr>
@@ -732,10 +821,9 @@
               </div>
 
               <div>
-                <label class="text-xs font-bold text-slate-700 block mb-1">Mensaje de Despedida / Garantía al Pie del
-                  Ticket</label>
+                <label class="text-xs font-bold text-slate-700 block mb-1">Mensaje de Despedida al Pie del Ticket</label>
                 <textarea id="setting-company-footer-view" oninput="syncCompanyPreview()" rows="2"
-                  placeholder="ej. ¡Gracias por su compra! Los cambios de mercadería son dentro de las 48 horas con este ticket."
+                  placeholder="ej. ¡Gracias por su preferencia! Vuelva pronto."
                   class="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white"></textarea>
               </div>
 
@@ -842,16 +930,16 @@
         </div>
       </div>
 
-      <form onsubmit="handleLogin(event)" class="space-y-4">
+      <form onsubmit="handleLogin(event)" class="space-y-4" autocomplete="off">
         <div>
           <label class="text-xs font-bold text-slate-600 block mb-1">Usuario</label>
-          <input type="text" id="login-username" value="admin" required placeholder="admin o cajero"
+          <input type="text" id="login-username" required placeholder="Ingrese su usuario" autocomplete="off" autocapitalize="none" spellcheck="false"
             class="w-full p-3 border border-slate-300 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
         </div>
         <div>
           <label class="text-xs font-bold text-slate-600 block mb-1">Contraseña</label>
           <div class="relative">
-            <input type="password" id="login-password" value="admin123" required placeholder="••••••••"
+            <input type="password" id="login-password" required placeholder="••••••••" autocomplete="new-password" spellcheck="false"
               class="w-full p-3 pr-10 border border-slate-300 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
             <button type="button" onclick="toggleInputPasswordVisibility('login-password', 'icon-login-pass')"
               class="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
@@ -865,8 +953,6 @@
           <i class="fa-solid fa-right-to-bracket mr-1"></i> Iniciar Sesión
         </button>
       </form>
-      <p class="text-[10px] text-center text-slate-400">Credenciales por defecto: <strong>admin</strong> /
-        <strong>admin123</strong> o <strong>cajero</strong> / <strong>cajero123</strong></p>
     </div>
   </div>
 
@@ -1250,18 +1336,18 @@
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label class="text-xs font-bold text-slate-700 block mb-1">Categoría</label>
-                <select id="prod-category"
-                  class="w-full p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-bold bg-white">
-                  <option value="Abarrotes">Abarrotes</option>
-                  <option value="Bebidas">Bebidas</option>
-                  <option value="Lácteos">Lácteos</option>
-                  <option value="Limpieza">Limpieza</option>
-                  <option value="Snacks">Snacks</option>
-                  <option value="Panadería">Panadería</option>
-                  <option value="Cuidado Personal">Cuidado Personal</option>
-                  <option value="Promociones/Combos">🎁 Promociones / Combos</option>
-                </select>
+                <label class="text-xs font-bold text-slate-700 block mb-1">Categoría *</label>
+                <div class="flex gap-2">
+                  <select id="prod-category"
+                    class="flex-1 p-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-bold bg-white">
+                    <option value="Abarrotes">Abarrotes</option>
+                  </select>
+                  <button type="button" onclick="openManageCategoriesModal()"
+                    class="px-3.5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 transition-all hover:scale-105 shrink-0"
+                    title="Crear nueva categoría o gestionar catálogo">
+                    <i class="fa-solid fa-folder-plus text-xs"></i> <span>+ Nueva</span>
+                  </button>
+                </div>
               </div>
               <div>
                 <label class="text-xs font-bold text-slate-700 block mb-1">Stock Inicial</label>
@@ -1342,6 +1428,66 @@
             <!-- Renderizado dinámico desde JavaScript -->
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL GESTOR MAESTRO DE CATEGORÍAS -->
+  <div id="modal-manage-categories"
+    class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div
+      class="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-4 sm:p-6 space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">
+            <i class="fa-solid fa-tags"></i>
+          </div>
+          <div>
+            <h3 class="font-black text-base text-slate-800">Catálogo de Categorías</h3>
+            <p class="text-[11px] text-slate-400">Crea o administra categorías para tu inventario</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeManageCategoriesModal()"
+          class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <!-- FORMULARIO CREAR CATEGORÍA -->
+      <form onsubmit="handleCreateCategory(event)" class="flex gap-2 shrink-0">
+        <input type="text" id="new-category-input" required placeholder="Nombre (ej. Mascotas, Licores)..."
+          class="flex-1 p-2.5 border border-slate-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 focus:bg-white shadow-inner">
+        <button type="submit"
+          class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-indigo-500/20 flex items-center gap-1.5 shrink-0 transition-all hover:scale-105 active:scale-95">
+          <i class="fa-solid fa-plus"></i> Añadir
+        </button>
+      </form>
+
+      <!-- SUGERENCIAS RÁPIDAS (INTERACTIVAS) -->
+      <div class="shrink-0 space-y-1.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/60">
+        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+          <i class="fa-solid fa-wand-magic-sparkles text-indigo-500"></i> Sugerencias de 1 clic:
+        </p>
+        <div class="flex flex-wrap gap-1.5">
+          <button type="button" onclick="quickAddCategory('Licores y Bebidas')" class="text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-slate-200 hover:border-indigo-300 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🍷 Licores</button>
+          <button type="button" onclick="quickAddCategory('Frutas y Verduras')" class="text-[11px] font-semibold bg-white hover:bg-emerald-50 text-emerald-700 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🍎 Frutas/Verduras</button>
+          <button type="button" onclick="quickAddCategory('Carnes y Embutidos')" class="text-[11px] font-semibold bg-white hover:bg-rose-50 text-rose-700 border border-slate-200 hover:border-rose-300 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🥩 Carnes</button>
+          <button type="button" onclick="quickAddCategory('Golosinas y Snacks')" class="text-[11px] font-semibold bg-white hover:bg-amber-50 text-amber-700 border border-slate-200 hover:border-amber-300 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🍬 Golosinas</button>
+          <button type="button" onclick="quickAddCategory('Mascotas')" class="text-[11px] font-semibold bg-white hover:bg-purple-50 text-purple-700 border border-slate-200 hover:border-purple-300 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🐾 Mascotas</button>
+          <button type="button" onclick="quickAddCategory('Ferretería y Bazar')" class="text-[11px] font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 hover:border-slate-400 px-2.5 py-1 rounded-lg transition-all shadow-xs active:scale-95">🔧 Bazar</button>
+        </div>
+      </div>
+
+      <!-- LISTA DE CATEGORÍAS EXISTENTES -->
+      <div class="overflow-y-auto flex-1 custom-scrollbar space-y-2 pr-1" id="categories-manage-list">
+        <!-- Renderizado dinámico desde app.js -->
+      </div>
+
+      <div class="pt-2 border-t border-slate-100 flex justify-end shrink-0">
+        <button type="button" onclick="closeManageCategoriesModal()"
+          class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
+          Listo
+        </button>
       </div>
     </div>
   </div>
@@ -1494,7 +1640,7 @@
         <!-- MÉTODO DE PAGO -->
         <div>
           <label class="text-xs font-bold text-slate-600 block mb-1">Método de Pago</label>
-          <div class="grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2">
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5 sm:gap-2">
             <button type="button" onclick="selectPaymentMethod('Efectivo')" id="pay-cash"
               class="pay-method-btn active bg-blue-50 border-2 border-blue-500 text-blue-900 font-bold p-2 sm:p-2.5 rounded-xl text-[11px] sm:text-xs flex flex-col items-center gap-1">
               <i class="fa-solid fa-money-bill-wave text-sm sm:text-base"></i> Efectivo
@@ -1515,6 +1661,10 @@
               class="pay-method-btn bg-amber-50 border border-amber-300 text-amber-900 font-bold p-2 sm:p-2.5 rounded-xl text-[11px] sm:text-xs flex flex-col items-center gap-1 hover:bg-amber-100">
               <i class="fa-solid fa-hand-holding-dollar text-sm sm:text-base text-amber-600"></i> FIADO
             </button>
+            <button type="button" onclick="selectPaymentMethod('Cortesia')" id="pay-cortesia"
+              class="pay-method-btn bg-pink-50 border border-pink-200 text-pink-900 font-bold p-2 sm:p-2.5 rounded-xl text-[11px] sm:text-xs flex flex-col items-center gap-1 hover:bg-pink-100" title="Consumo sin costo / muestra / degustación">
+              <i class="fa-solid fa-gift text-sm sm:text-base text-pink-600"></i> Cortesía
+            </button>
           </div>
         </div>
 
@@ -1534,6 +1684,19 @@
               <input type="number" step="0.50" id="mixed-other-input" readonly placeholder="0.00"
                 class="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold outline-none bg-slate-100 text-purple-900">
             </div>
+          </div>
+        </div>
+
+        <!-- BOX CORTESÍA -->
+        <div id="cortesia-box" class="hidden bg-pink-50/80 p-3 rounded-2xl border border-pink-200 space-y-2">
+          <p class="text-xs font-black text-pink-900 flex items-center gap-1.5">
+            <i class="fa-solid fa-gift text-pink-600"></i> Registro de Cortesía / Degustación
+          </p>
+          <p class="text-[11px] text-pink-700">El total se registrará como S/ 0.00 al cliente y se descontará del inventario sin ingresar efectivo a caja.</p>
+          <div>
+            <label class="text-[10px] font-bold text-slate-600">Motivo de la Cortesía *</label>
+            <input type="text" id="cortesia-reason" placeholder="ej. Degustación de cliente, Atención especial, Muestra..."
+              class="w-full p-2 border border-slate-300 rounded-lg text-xs font-semibold outline-none focus:ring-2 focus:ring-pink-500 bg-white">
           </div>
         </div>
 
