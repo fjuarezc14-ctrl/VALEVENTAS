@@ -515,10 +515,14 @@
           <h2 class="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-2">
             <i class="fa-solid fa-chart-line text-blue-600"></i> Reportes y Análisis
           </h2>
-          <div class="flex items-center gap-2 w-full sm:w-auto">
-            <button onclick="exportSalesToCSV()" id="btn-export-sales"
-              class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-colors admin-only">
-              <i class="fa-solid fa-file-excel text-sm"></i> Exportar Ventas (Excel)
+          <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button onclick="exportSalesReportToExcel()" id="btn-export-sales-excel"
+              class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all hover:scale-105 active:scale-95 admin-only" title="Descargar reporte en formato Excel (.xlsx) con estilos y formato financiero">
+              <i class="fa-solid fa-file-excel text-sm"></i> Exportar Excel (.xlsx)
+            </button>
+            <button onclick="exportSalesReportToPDF()" id="btn-export-sales-pdf"
+              class="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition-all hover:scale-105 active:scale-95 admin-only" title="Descargar o imprimir reporte en PDF oficial listo para archivar">
+              <i class="fa-solid fa-file-pdf text-sm"></i> Exportar PDF
             </button>
           </div>
         </div>
@@ -696,11 +700,19 @@
 
           <!-- TABLA DE TURNOS -->
           <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <div class="p-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2 bg-slate-50">
               <h3 class="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-2">
                 <i class="fa-solid fa-clock-rotate-left text-amber-500"></i> Turnos Registrados (Aperturas y Cierres)
               </h3>
-              <span id="shifts-count-badge" class="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-0.5 rounded-full">0 Turnos</span>
+              <div class="flex items-center gap-2">
+                <button onclick="exportShiftsToExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 admin-only" title="Exportar turnos a Excel (.xlsx)">
+                  <i class="fa-solid fa-file-excel"></i> Excel
+                </button>
+                <button onclick="exportShiftsToPDF()" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 admin-only" title="Exportar turnos a PDF">
+                  <i class="fa-solid fa-file-pdf"></i> PDF
+                </button>
+                <span id="shifts-count-badge" class="text-xs bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-full">0 Turnos</span>
+              </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar">
               <table class="w-full text-left text-xs sm:text-sm text-slate-600 min-w-[850px]">
@@ -2161,9 +2173,14 @@
     </div>
   </div>
 
+  <!-- LIBRERÍAS DE REPORTES EJECUTIVOS (EXCEL & PDF 100% OFFLINE) -->
+  <script src="js/vendor/exceljs.min.js"></script>
+  <script src="js/vendor/jspdf.umd.min.js"></script>
+  <script src="js/vendor/jspdf.plugin.autotable.min.js"></script>
+
   <!-- WEBSOCKETS SOCKET.IO & SCRIPT APLICACIÓN -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/js/app.js?v=2.0"></script>
+  <script src="/js/app.js?v=2.1"></script>
 </body>
 
 </html>

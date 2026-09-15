@@ -836,57 +836,601 @@ function setReportPreset(preset) {
   loadSalesHistory();
 }
 
-function exportSalesToCSV() {
+// ==========================================
+// EXPORTACIÓN PROFESIONAL DE REPORTES (EXCEL .XLSX Y PDF OFICIAL)
+// ==========================================
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 300);
+}
+
+function getReportTransactionsToExport() {
+  const combined = [];
+  (currentReportSales || []).forEach(s => {
+    combined.push({
+      id: s.id,
+      code: s.receipt_code,
+      date: new Date(s.created_at),
+      customer: s.customer_name || 'Público General',
+      doc: s.customer_doc || '-',
+      user: s.user_name || 'Sistema',
+      docType: s.doc_type || 'Ticket',
+      paymentMethod: s.payment_method || 'Efectivo',
+      amount: parseFloat(s.total) || 0,
+      profit: parseFloat(s.profit) || 0,
+      status: s.status || 'completada',
+      isAbono: false
+    });
+  });
+
+  (currentReportAbonos || []).forEach(a => {
+    combined.push({
+      id: a.id,
+      code: `AB-${String(a.id).padStart(5, '0')}`,
+      date: new Date(a.created_at),
+      customer: a.customer_name || 'Cliente Registrado',
+      doc: a.customer_doc || '-',
+      user: a.user_name || 'Sistema',
+      docType: 'RECIBO ABONO',
+      paymentMethod: 'Efectivo (Abono)',
+      amount: parseFloat(a.amount) || 0,
+      profit: 0,
+      status: 'completada',
+      isAbono: true
+    });
+  });
+
+  combined.sort((a, b) => b.date - a.date);
+
+  const query = (document.getElementById('rep-search-input')?.value || '').toLowerCase().trim();
+  return query
+    ? combined.filter(item =>
+        (item.code && item.code.toLowerCase().includes(query)) ||
+        (item.customer && item.customer.toLowerCase().includes(query)) ||
+        (item.user && item.user.toLowerCase().includes(query)) ||
+        (item.docType && item.docType.toLowerCase().includes(query)) ||
+        (item.paymentMethod && item.paymentMethod.toLowerCase().includes(query))
+      )
+    : combined;
+}
+
+function getReportFilterText() {
+  const sDate = document.getElementById('rep-start-date')?.value || 'Inicio';
+  const eDate = document.getElementById('rep-end-date')?.value || 'Hoy';
+  const pMethod = document.getElementById('rep-payment-method')?.value || 'Todos';
+  const dType = document.getElementById('rep-doc-type')?.value || 'Todos';
+  return `Fechas: ${sDate} al ${eDate} | Método: ${pMethod} | Comprobante: ${dType}`;
+}
+
+async function exportSalesReportToExcel() {
   if (!currentUser || currentUser.role !== 'Admin') {
     alert('⚠️ Solo el Administrador puede exportar reportes.');
     return;
   }
 
-  if (!currentReportSales || currentReportSales.length === 0) {
-    alert('⚠️ No hay datos de ventas para exportar con los filtros actuales.');
+  const transactions = getReportTransactionsToExport();
+  if (!transactions || transactions.length === 0) {
+    alert('⚠️ No hay transacciones de ventas para exportar con los filtros actuales.');
     return;
   }
 
-  let totalMonto = 0;
-  let totalGanancia = 0;
-  currentReportSales.forEach(s => {
-    totalMonto += s.total || 0;
-    totalGanancia += s.profit || 0;
-  });
+  if (typeof ExcelJS === 'undefined') {
+    alert('⚠️ La librería de Excel aún no ha cargado. Por favor, refresque la página.');
+    return;
+  }
 
-  const headers = ['N° Comprobante', 'Fecha / Hora', 'Cliente', 'DNI/RUC', 'Vendedor / Cajero', 'Tipo Comprobante', 'Método Pago', 'Monto Total (S/)', 'Ganancia Neta (S/)', 'Estado'];
-  const rows = currentReportSales.map(s => [
-    s.receipt_code,
-    new Date(s.created_at).toLocaleString(),
-    (s.customer_name || 'Público General').replace(/;/g, ','),
-    s.customer_doc || '-',
-    (s.user_name || 'Sistema').replace(/;/g, ','),
-    s.doc_type,
-    s.payment_method,
-    s.total.toFixed(2),
-    s.profit.toFixed(2),
-    s.status
-  ]);
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'VALEVENTAS POS by VT VALETEC';
+    workbook.created = new Date();
 
-  const csvContent = '\uFEFF' + [
-    'sep=;',
-    `REPORTE DE VENTAS - SISTEMA VALE-VENTAS POS`,
-    `Fecha de Generación;${new Date().toLocaleString()}`,
-    `Total Ventas;S/ ${totalMonto.toFixed(2)};Ganancia Neta;S/ ${totalGanancia.toFixed(2)};Transacciones;${currentReportSales.length}`,
-    '',
-    headers.join(';'),
-    ...rows.map(r => r.join(';'))
-  ].join('\n');
+    const sheet = workbook.addWorksheet('Reporte de Ventas', {
+      views: [{ showGridLines: true }]
+    });
 
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
+    const companyName = COMPANY_SETTINGS?.name || 'VALEVENTAS';
+    const companyRuc = COMPANY_SETTINGS?.ruc || '20123456789';
+    const companyAddr = COMPANY_SETTINGS?.address || 'Av. Principal 123 - Lima, Perú';
+    const companyPhone = COMPANY_SETTINGS?.phone || '987654321';
 
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `Reporte_Ventas_VALEVENTAS_${new Date().toISOString().split('T')[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+    // 1. BANNER INSTITUCIONAL DE CABECERA
+    sheet.mergeCells('A1:J1');
+    const titleCell = sheet.getCell('A1');
+    titleCell.value = 'VALEVENTAS POS - REPORTE EJECUTIVO DE VENTAS Y COMPROBANTES';
+    titleCell.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet.getRow(1).height = 36;
+
+    sheet.mergeCells('A2:J2');
+    const subCell = sheet.getCell('A2');
+    subCell.value = `${companyName} | RUC: ${companyRuc} | Dirección: ${companyAddr} | Teléfono: ${companyPhone}`;
+    subCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF38BDF8' } };
+    subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet.getRow(2).height = 22;
+
+    sheet.mergeCells('A3:J3');
+    const metaCell = sheet.getCell('A3');
+    metaCell.value = `Emisión: ${new Date().toLocaleString()} | Generado por: ${currentUser.name} (${currentUser.username}) | Filtros: ${getReportFilterText()}`;
+    metaCell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FFE2E8F0' } };
+    metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+    metaCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet.getRow(3).height = 20;
+
+    sheet.getRow(4).height = 10;
+
+    // 2. TARJETAS DE INDICADORES FINANCIEROS (KPIS)
+    let totalVentas = 0;
+    let totalGanancia = 0;
+    const breakdown = { cash: 0, card: 0, transfer: 0, fiado: 0, abono: 0, cortesia: 0, mixto: 0 };
+
+    transactions.forEach(t => {
+      if (t.status !== 'anulada') {
+        totalVentas += t.amount;
+        totalGanancia += t.profit;
+
+        if (t.isAbono) breakdown.abono += t.amount;
+        else if (t.paymentMethod === 'Efectivo') breakdown.cash += t.amount;
+        else if (t.paymentMethod === 'Tarjeta') breakdown.card += t.amount;
+        else if (t.paymentMethod === 'Yape/Plin') breakdown.transfer += t.amount;
+        else if (t.paymentMethod === 'Fiado') breakdown.fiado += t.amount;
+        else if (t.paymentMethod === 'Cortesia') breakdown.cortesia += t.amount;
+        else if (t.paymentMethod === 'Pago Mixto') breakdown.mixto += t.amount;
+      }
+    });
+
+    const totalTickets = transactions.length;
+    const avgTicket = totalTickets > 0 ? (totalVentas / totalTickets) : 0;
+
+    const styleKpiCard = (headerRange, valueRange, title, value, isCurrency, headerColor, textColor, bgColor) => {
+      sheet.mergeCells(headerRange);
+      const hCell = sheet.getCell(headerRange.split(':')[0]);
+      hCell.value = title;
+      hCell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+      hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerColor } };
+      hCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      sheet.mergeCells(valueRange);
+      const vCell = sheet.getCell(valueRange.split(':')[0]);
+      vCell.value = value;
+      vCell.font = { name: 'Calibri', size: 15, bold: true, color: { argb: textColor } };
+      vCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+      vCell.alignment = { vertical: 'middle', horizontal: 'center' };
+      if (isCurrency) vCell.numFmt = '[$S/ ]#,##0.00';
+      else vCell.numFmt = '#,##0';
+    };
+
+    sheet.getRow(5).height = 18;
+    sheet.getRow(6).height = 28;
+
+    styleKpiCard('A5:B5', 'A6:B6', 'VENTAS TOTALES', totalVentas, true, 'FF1E40AF', 'FF1E40AF', 'FFEFF6FF');
+    styleKpiCard('C5:D5', 'C6:D6', 'GANANCIA NETA ESTIMADA', totalGanancia, true, 'FF065F46', 'FF065F46', 'FFECFDF5');
+    styleKpiCard('E5:G5', 'E6:G6', 'TOTAL TRANSACCIONES', totalTickets, false, 'FF374151', 'FF111827', 'FFF3F4F6');
+    styleKpiCard('H5:J5', 'H6:J6', 'TICKET PROMEDIO', avgTicket, true, 'FF6B21A8', 'FF6B21A8', 'FFFAF5FF');
+
+    sheet.getRow(7).height = 12;
+
+    // 3. TABLA DE RECAUDACIÓN POR MÉTODO DE PAGO
+    sheet.mergeCells('A8:D8');
+    const recTitle = sheet.getCell('A8');
+    recTitle.value = 'RESUMEN DE RECAUDACIÓN POR MÉTODO DE PAGO';
+    recTitle.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    recTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    recTitle.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    sheet.getRow(8).height = 20;
+
+    sheet.mergeCells('A9:B9');
+    sheet.getCell('A9').value = 'Método de Pago';
+    sheet.getCell('C9').value = 'Monto Total';
+    sheet.getCell('D9').value = '% Participación';
+    ['A9', 'B9', 'C9', 'D9'].forEach(pos => {
+      const c = sheet.getCell(pos);
+      c.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF475569' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      c.alignment = { vertical: 'middle', horizontal: pos === 'C9' || pos === 'D9' ? 'right' : 'left' };
+    });
+    sheet.getRow(9).height = 18;
+
+    const paymentRows = [
+      ['💵 Efectivo en Ventas', breakdown.cash],
+      ['💳 Tarjeta Débito / Crédito', breakdown.card],
+      ['📱 Transferencias (Yape / Plin)', breakdown.transfer],
+      ['🤝 Ventas al Fiado (Por Cobrar)', breakdown.fiado],
+      ['💰 Cobranzas y Abonos Fiado', breakdown.abono],
+      ['🎁 Salidas por Cortesía', breakdown.cortesia]
+    ];
+
+    paymentRows.forEach((row, idx) => {
+      const rowNum = 10 + idx;
+      sheet.mergeCells(`A${rowNum}:B${rowNum}`);
+      const mLabel = sheet.getCell(`A${rowNum}`);
+      mLabel.value = row[0];
+      mLabel.font = { name: 'Calibri', size: 9 };
+
+      const mAmt = sheet.getCell(`C${rowNum}`);
+      mAmt.value = row[1];
+      mAmt.numFmt = '[$S/ ]#,##0.00';
+      mAmt.font = { name: 'Calibri', size: 9, bold: true };
+      mAmt.alignment = { horizontal: 'right' };
+
+      const mPct = sheet.getCell(`D${rowNum}`);
+      mPct.value = totalVentas > 0 ? (row[1] / totalVentas) : 0;
+      mPct.numFmt = '0.0%';
+      mPct.font = { name: 'Calibri', size: 9, color: { argb: 'FF64748B' } };
+      mPct.alignment = { horizontal: 'right' };
+
+      sheet.getRow(rowNum).height = 18;
+    });
+
+    sheet.getRow(16).height = 12;
+
+    // 4. TABLA PRINCIPAL DE TRANSACCIONES
+    sheet.mergeCells('A17:J17');
+    const tHeadTitle = sheet.getCell('A17');
+    tHeadTitle.value = 'DETALLE INDIVIDUAL DE VENTAS Y COMPROBANTES EMITIDOS';
+    tHeadTitle.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    tHeadTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    tHeadTitle.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    sheet.getRow(17).height = 22;
+
+    const headers = [
+      'N° Comprobante',
+      'Fecha / Hora',
+      'Cliente',
+      'Doc. Identidad',
+      'Vendedor / Cajero',
+      'Tipo Comprobante',
+      'Método de Pago',
+      'Monto Total (S/)',
+      'Ganancia Neta (S/)',
+      'Estado'
+    ];
+
+    const headerRow = sheet.getRow(18);
+    headerRow.values = headers;
+    headerRow.height = 24;
+    headerRow.eachCell((cell) => {
+      cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF475569' } },
+        bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+        left: { style: 'thin', color: { argb: 'FF475569' } },
+        right: { style: 'thin', color: { argb: 'FF475569' } }
+      };
+    });
+
+    // Filas de datos
+    transactions.forEach((t, i) => {
+      const rowIdx = 19 + i;
+      const row = sheet.getRow(rowIdx);
+      row.values = [
+        t.code,
+        t.date.toLocaleString(),
+        t.customer,
+        t.doc,
+        t.user,
+        t.docType,
+        t.paymentMethod,
+        t.amount,
+        t.profit,
+        t.status.toUpperCase()
+      ];
+
+      const isEven = i % 2 === 0;
+      const rowBg = isEven ? 'FFFFFFFF' : 'FFF8FAFC';
+
+      row.eachCell((cell, colNum) => {
+        cell.font = { name: 'Calibri', size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+
+        if (colNum === 1) {
+          cell.alignment = { horizontal: 'center' };
+          cell.font = { name: 'Calibri', size: 9, bold: true };
+        } else if (colNum === 2 || colNum === 4 || colNum === 6 || colNum === 7) {
+          cell.alignment = { horizontal: 'center' };
+        } else if (colNum === 3 || colNum === 5) {
+          cell.alignment = { horizontal: 'left' };
+        } else if (colNum === 8) {
+          cell.alignment = { horizontal: 'right' };
+          cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF1E40AF' } };
+          cell.numFmt = '[$S/ ]#,##0.00';
+        } else if (colNum === 9) {
+          cell.alignment = { horizontal: 'right' };
+          cell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF065F46' } };
+          cell.numFmt = '[$S/ ]#,##0.00';
+        } else if (colNum === 10) {
+          cell.alignment = { horizontal: 'center' };
+          const isOk = t.status !== 'anulada';
+          cell.font = { name: 'Calibri', size: 8.5, bold: true, color: { argb: isOk ? 'FF059669' : 'FFE11D48' } };
+        }
+      });
+      row.height = 20;
+    });
+
+    // 5. FILA DE TOTALES GENERALES
+    const lastRowIdx = 19 + transactions.length;
+    sheet.mergeCells(`A${lastRowIdx}:G${lastRowIdx}`);
+    const totLabel = sheet.getCell(`A${lastRowIdx}`);
+    totLabel.value = 'TOTALES CONSOLIDADOS';
+    totLabel.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    totLabel.alignment = { vertical: 'middle', horizontal: 'right', indent: 1 };
+    totLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+
+    const totSalesCell = sheet.getCell(`H${lastRowIdx}`);
+    totSalesCell.value = { formula: `SUM(H19:H${lastRowIdx - 1})` };
+    totSalesCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E40AF' } };
+    totSalesCell.alignment = { vertical: 'middle', horizontal: 'right' };
+    totSalesCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    totSalesCell.numFmt = '[$S/ ]#,##0.00';
+    totSalesCell.border = { bottom: { style: 'double', color: { argb: 'FF0F172A' } } };
+
+    const totProfitCell = sheet.getCell(`I${lastRowIdx}`);
+    totProfitCell.value = { formula: `SUM(I19:I${lastRowIdx - 1})` };
+    totProfitCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF065F46' } };
+    totProfitCell.alignment = { vertical: 'middle', horizontal: 'right' };
+    totProfitCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    totProfitCell.numFmt = '[$S/ ]#,##0.00';
+    totProfitCell.border = { bottom: { style: 'double', color: { argb: 'FF0F172A' } } };
+
+    const totStatusCell = sheet.getCell(`J${lastRowIdx}`);
+    totStatusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+
+    sheet.getRow(lastRowIdx).height = 24;
+
+    sheet.columns = [
+      { width: 18 }, // A: Comprobante
+      { width: 22 }, // B: Fecha/Hora
+      { width: 30 }, // C: Cliente
+      { width: 16 }, // D: Doc
+      { width: 22 }, // E: Vendedor
+      { width: 18 }, // F: Tipo
+      { width: 22 }, // G: Método Pago
+      { width: 18 }, // H: Total S/
+      { width: 18 }, // I: Ganancia S/
+      { width: 15 }  // J: Estado
+    ];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const filename = `Reporte_Ventas_${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    downloadBlob(blob, filename);
+
+    playBeep('success');
+  } catch (err) {
+    console.error('Error generando Excel:', err);
+    playBeep('error');
+    alert('❌ Error generando archivo Excel: ' + err.message);
+  }
+}
+
+async function exportSalesReportToPDF() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede exportar reportes.');
+    return;
+  }
+
+  const transactions = getReportTransactionsToExport();
+  if (!transactions || transactions.length === 0) {
+    alert('⚠️ No hay transacciones de ventas para exportar con los filtros actuales.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf || {};
+  if (!jsPDF) {
+    alert('⚠️ La librería de PDF aún no ha cargado. Por favor, refresque la página.');
+    return;
+  }
+
+  try {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    const companyName = COMPANY_SETTINGS?.name || 'VALEVENTAS';
+    const companyRuc = COMPANY_SETTINGS?.ruc || '20123456789';
+    const companyAddr = COMPANY_SETTINGS?.address || 'Av. Principal 123 - Lima, Perú';
+    const companyPhone = COMPANY_SETTINGS?.phone || '987654321';
+
+    // 1. Barra superior decorativa
+    doc.setFillColor(37, 99, 235);
+    doc.rect(0, 0, pageWidth, 8, 'F');
+
+    // 2. Encabezado corporativo
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text(companyName, 40, 36);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`RUC: ${companyRuc}  |  ${companyAddr}  |  Telf: ${companyPhone}`, 40, 49);
+
+    // Título derecho
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(30, 41, 59);
+    doc.text('REPORTE OFICIAL DE VENTAS Y COMPROBANTES', pageWidth - 40, 34, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Generado: ${new Date().toLocaleString()}  |  Usuario: ${currentUser.name}`, pageWidth - 40, 47, { align: 'right' });
+
+    // 3. Tarjetas de KPIs (Resumen)
+    let totalVentas = 0;
+    let totalGanancia = 0;
+    transactions.forEach(t => {
+      if (t.status !== 'anulada') {
+        totalVentas += t.amount;
+        totalGanancia += t.profit;
+      }
+    });
+    const avgTicket = transactions.length > 0 ? (totalVentas / transactions.length) : 0;
+
+    const kpiCards = [
+      { label: 'VENTAS TOTALES', val: `S/ ${totalVentas.toFixed(2)}`, color: [30, 64, 175], bg: [239, 246, 255] },
+      { label: 'GANANCIA ESTIMADA', val: `S/ ${totalGanancia.toFixed(2)}`, color: [6, 95, 70], bg: [236, 253, 245] },
+      { label: 'N° TRANSACCIONES', val: `${transactions.length}`, color: [55, 65, 81], bg: [243, 244, 246] },
+      { label: 'TICKET PROMEDIO', val: `S/ ${avgTicket.toFixed(2)}`, color: [107, 33, 168], bg: [250, 245, 255] }
+    ];
+
+    const cardWidth = (pageWidth - 80 - 30) / 4;
+    const cardY = 62;
+    const cardH = 38;
+
+    kpiCards.forEach((c, i) => {
+      const x = 40 + i * (cardWidth + 10);
+      doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 5, 5, 'F');
+      doc.setDrawColor(c.color[0], c.color[1], c.color[2]);
+      doc.setLineWidth(0.8);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 5, 5, 'S');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(c.color[0], c.color[1], c.color[2]);
+      doc.text(c.label, x + cardWidth / 2, cardY + 13, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.val, x + cardWidth / 2, cardY + 30, { align: 'center' });
+    });
+
+    // Línea de filtros
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Parámetros de filtrado: ${getReportFilterText()}`, 40, 114);
+
+    // 4. Tabla de Transacciones con autoTable
+    const tableHeaders = [
+      ['N° Comprobante', 'Fecha / Hora', 'Cliente', 'Doc. Identidad', 'Vendedor', 'Tipo', 'Método Pago', 'Total (S/)', 'Ganancia (S/)', 'Estado']
+    ];
+
+    const tableData = transactions.map(t => [
+      t.code,
+      t.date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
+      t.customer.length > 25 ? t.customer.substring(0, 23) + '...' : t.customer,
+      t.doc,
+      t.user,
+      t.docType,
+      t.paymentMethod,
+      `S/ ${t.amount.toFixed(2)}`,
+      `S/ ${t.profit.toFixed(2)}`,
+      t.status.toUpperCase()
+    ]);
+
+    const tableFoot = [
+      [
+        'TOTALES',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        `S/ ${totalVentas.toFixed(2)}`,
+        `S/ ${totalGanancia.toFixed(2)}`,
+        ''
+      ]
+    ];
+
+    doc.autoTable({
+      head: tableHeaders,
+      body: tableData,
+      foot: tableFoot,
+      startY: 122,
+      margin: { left: 40, right: 40, bottom: 35 },
+      theme: 'striped',
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'center',
+        cellPadding: 4
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        cellPadding: 3.5,
+        textColor: [51, 65, 85]
+      },
+      footStyles: {
+        fillColor: [226, 232, 240],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        cellPadding: 4
+      },
+      columnStyles: {
+        0: { halign: 'center', fontStyle: 'bold', cellWidth: 70 },
+        1: { halign: 'center', cellWidth: 75 },
+        2: { halign: 'left', cellWidth: 120 },
+        3: { halign: 'center', cellWidth: 65 },
+        4: { halign: 'left', cellWidth: 75 },
+        5: { halign: 'center', cellWidth: 65 },
+        6: { halign: 'center', cellWidth: 75 },
+        7: { halign: 'right', fontStyle: 'bold', textColor: [30, 64, 175], cellWidth: 70 },
+        8: { halign: 'right', fontStyle: 'bold', textColor: [6, 95, 70], cellWidth: 70 },
+        9: { halign: 'center', fontStyle: 'bold', cellWidth: 65 }
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 9) {
+          const isOk = data.cell.raw !== 'ANULADA';
+          data.cell.styles.textColor = isOk ? [5, 150, 105] : [225, 29, 72];
+        }
+      },
+      didDrawPage: function(data) {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `VALEVENTAS POS | Soluciones de Punto de Venta & Facturación by VT VALETEC`,
+          40,
+          pageHeight - 15
+        );
+        doc.text(
+          `Página ${doc.internal.getCurrentPageInfo().pageNumber} de ${pageCount}`,
+          pageWidth - 40,
+          pageHeight - 15,
+          { align: 'right' }
+        );
+      }
+    });
+
+    const filename = `Reporte_Ventas_${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+    playBeep('success');
+  } catch (err) {
+    console.error('Error generando PDF:', err);
+    playBeep('error');
+    alert('❌ Error generando PDF: ' + err.message);
+  }
+}
+
+// Fallback / Alias
+function exportSalesToCSV() {
+  exportSalesReportToExcel();
 }
 
 async function loadUsers() {
@@ -3161,18 +3705,21 @@ function switchReportSubTab(subTab) {
   const shiftsView = document.getElementById('rep-subview-shifts');
   const btnSales = document.getElementById('btn-subtab-sales');
   const btnShifts = document.getElementById('btn-subtab-shifts');
-  const btnExport = document.getElementById('btn-export-sales');
+  const btnExportExcel = document.getElementById('btn-export-sales-excel');
+  const btnExportPdf = document.getElementById('btn-export-sales-pdf');
 
   if (subTab === 'sales') {
     salesView?.classList.remove('hidden');
     shiftsView?.classList.add('hidden');
-    btnExport?.classList.remove('hidden');
+    btnExportExcel?.classList.remove('hidden');
+    btnExportPdf?.classList.remove('hidden');
     if (btnSales) btnSales.className = 'px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-2 transition-all';
     if (btnShifts) btnShifts.className = 'px-4 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-2 transition-all';
   } else {
     salesView?.classList.add('hidden');
     shiftsView?.classList.remove('hidden');
-    btnExport?.classList.add('hidden');
+    btnExportExcel?.classList.add('hidden');
+    btnExportPdf?.classList.add('hidden');
     if (btnShifts) btnShifts.className = 'px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-2 transition-all';
     if (btnSales) btnSales.className = 'px-4 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-xl font-bold text-xs border border-slate-200 flex items-center gap-2 transition-all';
     populateShiftUsersDropdown();
@@ -3267,6 +3814,448 @@ function renderShiftsTable(shifts = []) {
       </tr>
     `;
   }).join('');
+}
+
+async function exportShiftsToExcel() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede exportar reportes.');
+    return;
+  }
+
+  if (!currentShiftsHistory || currentShiftsHistory.length === 0) {
+    alert('⚠️ No hay turnos de caja registrados para exportar con los filtros actuales.');
+    return;
+  }
+
+  if (!window.ExcelJS) {
+    alert('⚠️ La librería de Excel aún no ha cargado. Por favor, refresque la página.');
+    return;
+  }
+
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'VALEVENTAS POS';
+    workbook.created = new Date();
+
+    const ws = workbook.addWorksheet('Turnos y Arqueos Z', {
+      views: [{ showGridLines: true }]
+    });
+
+    const companyName = COMPANY_SETTINGS?.name || 'VALEVENTAS';
+    const companyRuc = COMPANY_SETTINGS?.ruc || '20123456789';
+    const companyAddr = COMPANY_SETTINGS?.address || 'Av. Principal 123 - Lima, Perú';
+    const companyPhone = COMPANY_SETTINGS?.phone || '987654321';
+
+    // 1. Encabezado corporativo
+    ws.mergeCells('B2:I2');
+    const titleCell = ws.getCell('B2');
+    titleCell.value = companyName.toUpperCase();
+    titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FF1E293B' } };
+
+    ws.mergeCells('B3:I3');
+    const subCell = ws.getCell('B3');
+    subCell.value = `RUC: ${companyRuc}  |  ${companyAddr}  |  Telf: ${companyPhone}`;
+    subCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF64748B' } };
+
+    ws.mergeCells('B4:I4');
+    const docTitle = ws.getCell('B4');
+    docTitle.value = 'HISTORIAL DE TURNOS Y ARQUEOS DE CAJA (CORTE Z)';
+    docTitle.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFD97706' } };
+
+    ws.mergeCells('B5:I5');
+    const metaCell = ws.getCell('B5');
+    metaCell.value = `Generado: ${new Date().toLocaleString()} | Usuario: ${currentUser.name}`;
+    metaCell.font = { name: 'Calibri', size: 9, color: { argb: 'FF94A3B8' } };
+
+    // 2. Tarjetas KPI Resumen
+    let totalCashSales = 0;
+    let totalExpected = 0;
+    let totalActual = 0;
+    let totalDiff = 0;
+    let closedCount = 0;
+
+    currentShiftsHistory.forEach(s => {
+      const cs = parseFloat(s.cash_sales) || 0;
+      const ex = parseFloat(s.expected_cash) || 0;
+      totalCashSales += cs;
+      totalExpected += ex;
+      if (s.status === 'cerrada' && s.actual_cash !== null) {
+        closedCount++;
+        totalActual += parseFloat(s.actual_cash) || 0;
+        totalDiff += parseFloat(s.difference) || 0;
+      }
+    });
+
+    const kpiData = [
+      { label: 'TOTAL TURNOS', val: currentShiftsHistory.length, numFmt: '#,##0', colStart: 2, colEnd: 3, bg: 'FFE0F2FE', fontColor: 'FF0369A1' },
+      { label: 'TURNOS CERRADOS', val: closedCount, numFmt: '#,##0', colStart: 4, colEnd: 5, bg: 'FFF1F5F9', fontColor: 'FF334155' },
+      { label: 'TOTAL EFECTIVO VENTAS', val: totalCashSales, numFmt: '"S/ "#,##0.00', colStart: 6, colEnd: 7, bg: 'FFECFDF5', fontColor: 'FF047857' },
+      { label: 'BALANCE DIFERENCIAS', val: totalDiff, numFmt: '"+"\"S/ \"#,##0.00;"-"\"S/ \"#,##0.00;"S/ 0.00"', colStart: 8, colEnd: 10, bg: totalDiff >= 0 ? 'FFEFF6FF' : 'FFFFF1F2', fontColor: totalDiff >= 0 ? 'FF1D4ED8' : 'FFE11D48' }
+    ];
+
+    ws.getRow(7).height = 16;
+    ws.getRow(8).height = 24;
+
+    kpiData.forEach(k => {
+      const topCell = ws.getCell(7, k.colStart);
+      const valCell = ws.getCell(8, k.colStart);
+      ws.mergeCells(7, k.colStart, 7, k.colEnd);
+      ws.mergeCells(8, k.colStart, 8, k.colEnd);
+
+      topCell.value = k.label;
+      topCell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: k.fontColor } };
+      topCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      topCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: k.bg } };
+
+      valCell.value = k.val;
+      valCell.numFmt = k.numFmt;
+      valCell.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FF0F172A' } };
+      valCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: k.bg } };
+
+      for (let r = 7; r <= 8; r++) {
+        for (let c = k.colStart; c <= k.colEnd; c++) {
+          const borderStyle = { style: 'thin', color: { argb: 'FFCBD5E1' } };
+          ws.getCell(r, c).border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
+        }
+      }
+    });
+
+    // 3. Tabla de Turnos
+    const startRow = 11;
+    const headers = [
+      'N° Turno',
+      'Cajero',
+      'Fecha Apertura',
+      'Fecha Cierre',
+      'Monto Inicial (S/)',
+      'Ventas Efectivo (S/)',
+      'Esperado Caja (S/)',
+      'Real Declarado (S/)',
+      'Diferencia (S/)',
+      'Estado'
+    ];
+
+    const hRow = ws.getRow(startRow);
+    hRow.height = 24;
+    headers.forEach((h, idx) => {
+      const cell = hRow.getCell(idx + 1);
+      cell.value = h;
+      cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { top: { style: 'thin', color: { argb: 'FF000000' } }, bottom: { style: 'medium', color: { argb: 'FF000000' } } };
+    });
+
+    let currentRow = startRow + 1;
+    currentShiftsHistory.forEach((s, idx) => {
+      const row = ws.getRow(currentRow);
+      row.height = 20;
+      const isZebra = idx % 2 === 1;
+      const rowBg = isZebra ? 'FFF8FAFC' : 'FFFFFFFF';
+
+      const initial = parseFloat(s.opening_amount) || 0;
+      const cashSales = parseFloat(s.cash_sales) || 0;
+      const expected = parseFloat(s.expected_cash) || 0;
+      const actual = s.actual_cash !== null ? parseFloat(s.actual_cash) : null;
+      const diff = s.difference !== null ? parseFloat(s.difference) : null;
+
+      const cells = [
+        { val: `#${String(s.id).padStart(4, '0')}`, align: 'center', bold: true },
+        { val: s.user_name || 'Cajero', align: 'left' },
+        { val: s.opened_at ? new Date(s.opened_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '--', align: 'center' },
+        { val: s.closed_at ? new Date(s.closed_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Abierta', align: 'center' },
+        { val: initial, align: 'right', numFmt: '"S/ "#,##0.00' },
+        { val: cashSales, align: 'right', numFmt: '"S/ "#,##0.00', bold: true },
+        { val: expected, align: 'right', numFmt: '"S/ "#,##0.00' },
+        { val: actual !== null ? actual : '--', align: 'right', numFmt: actual !== null ? '"S/ "#,##0.00' : undefined, bold: true },
+        { val: diff !== null ? diff : '--', align: 'right', numFmt: diff !== null ? '"+"\"S/ \"#,##0.00;"-"\"S/ \"#,##0.00;"S/ 0.00"' : undefined, bold: true, color: diff !== null ? (diff >= 0 ? 'FF047857' : 'FFE11D48') : undefined },
+        { val: s.status === 'abierta' ? 'ABIERTA' : 'CERRADA', align: 'center', bold: true, color: s.status === 'abierta' ? 'FF047857' : 'FF64748B' }
+      ];
+
+      cells.forEach((c, cIdx) => {
+        const cell = row.getCell(cIdx + 1);
+        cell.value = c.val;
+        cell.alignment = { horizontal: c.align, vertical: 'middle' };
+        cell.font = { name: 'Calibri', size: 9.5, bold: !!c.bold, color: c.color ? { argb: c.color } : { argb: 'FF1E293B' } };
+        if (c.numFmt) cell.numFmt = c.numFmt;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } } };
+      });
+
+      currentRow++;
+    });
+
+    // Fila de totales
+    const totRow = ws.getRow(currentRow);
+    totRow.height = 22;
+    totRow.getCell(1).value = 'TOTALES';
+    totRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    totRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    totRow.getCell(6).value = totalCashSales;
+    totRow.getCell(6).numFmt = '"S/ "#,##0.00';
+    totRow.getCell(6).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    totRow.getCell(6).alignment = { horizontal: 'right', vertical: 'middle' };
+
+    totRow.getCell(8).value = totalActual;
+    totRow.getCell(8).numFmt = '"S/ "#,##0.00';
+    totRow.getCell(8).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    totRow.getCell(8).alignment = { horizontal: 'right', vertical: 'middle' };
+
+    totRow.getCell(9).value = totalDiff;
+    totRow.getCell(9).numFmt = '"+"\"S/ \"#,##0.00;"-"\"S/ \"#,##0.00;"S/ 0.00"';
+    totRow.getCell(9).font = { name: 'Calibri', size: 10, bold: true, color: { argb: totalDiff >= 0 ? 'FF047857' : 'FFE11D48' } };
+    totRow.getCell(9).alignment = { horizontal: 'right', vertical: 'middle' };
+
+    for (let c = 1; c <= 10; c++) {
+      const cell = totRow.getCell(c);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+      cell.border = { top: { style: 'medium', color: { argb: 'FF94A3B8' } }, bottom: { style: 'double', color: { argb: 'FF64748B' } } };
+    }
+
+    // Auto-ajuste de columnas
+    ws.columns.forEach((col, idx) => {
+      let maxLen = 12;
+      col.eachCell({ includeEmpty: false }, (cell, rowNum) => {
+        if (rowNum >= startRow) {
+          const valStr = cell.value ? String(cell.value) : '';
+          if (valStr.length > maxLen) maxLen = Math.min(valStr.length + 3, 30);
+        }
+      });
+      col.width = Math.max(maxLen, 12);
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const filename = `Reporte_Turnos_${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    downloadBlob(blob, filename);
+
+    playBeep('success');
+  } catch (err) {
+    console.error('Error generando Excel de turnos:', err);
+    playBeep('error');
+    alert('❌ Error generando archivo Excel: ' + err.message);
+  }
+}
+
+async function exportShiftsToPDF() {
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert('⚠️ Solo el Administrador puede exportar reportes.');
+    return;
+  }
+
+  if (!currentShiftsHistory || currentShiftsHistory.length === 0) {
+    alert('⚠️ No hay turnos de caja registrados para exportar con los filtros actuales.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf || {};
+  if (!jsPDF) {
+    alert('⚠️ La librería de PDF aún no ha cargado. Por favor, refresque la página.');
+    return;
+  }
+
+  try {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    const companyName = COMPANY_SETTINGS?.name || 'VALEVENTAS';
+    const companyRuc = COMPANY_SETTINGS?.ruc || '20123456789';
+    const companyAddr = COMPANY_SETTINGS?.address || 'Av. Principal 123 - Lima, Perú';
+    const companyPhone = COMPANY_SETTINGS?.phone || '987654321';
+
+    // 1. Barra superior
+    doc.setFillColor(217, 119, 6);
+    doc.rect(0, 0, pageWidth, 8, 'F');
+
+    // 2. Encabezado corporativo
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text(companyName, 40, 36);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`RUC: ${companyRuc}  |  ${companyAddr}  |  Telf: ${companyPhone}`, 40, 49);
+
+    // Título derecho
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(30, 41, 59);
+    doc.text('REPORTE DE TURNOS Y ARQUEOS DE CAJA (CORTE Z)', pageWidth - 40, 34, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Generado: ${new Date().toLocaleString()}  |  Usuario: ${currentUser.name}`, pageWidth - 40, 47, { align: 'right' });
+
+    // 3. Tarjetas KPI
+    let totalCashSales = 0;
+    let totalActual = 0;
+    let totalDiff = 0;
+    let closedCount = 0;
+
+    currentShiftsHistory.forEach(s => {
+      totalCashSales += parseFloat(s.cash_sales) || 0;
+      if (s.status === 'cerrada' && s.actual_cash !== null) {
+        closedCount++;
+        totalActual += parseFloat(s.actual_cash) || 0;
+        totalDiff += parseFloat(s.difference) || 0;
+      }
+    });
+
+    const kpiCards = [
+      { label: 'TOTAL TURNOS', val: `${currentShiftsHistory.length}`, color: [3, 105, 161], bg: [224, 242, 254] },
+      { label: 'TURNOS CERRADOS', val: `${closedCount}`, color: [51, 65, 85], bg: [241, 245, 249] },
+      { label: 'VENTAS EN EFECTIVO', val: `S/ ${totalCashSales.toFixed(2)}`, color: [4, 120, 87], bg: [236, 253, 245] },
+      { label: 'BALANCE DIFERENCIAS', val: `${totalDiff >= 0 ? '+' : ''}S/ ${totalDiff.toFixed(2)}`, color: totalDiff >= 0 ? [29, 78, 216] : [225, 29, 72], bg: totalDiff >= 0 ? [239, 246, 255] : [255, 241, 242] }
+    ];
+
+    const cardWidth = (pageWidth - 80 - 30) / 4;
+    const cardY = 62;
+    const cardH = 38;
+
+    kpiCards.forEach((c, i) => {
+      const x = 40 + i * (cardWidth + 10);
+      doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 5, 5, 'F');
+      doc.setDrawColor(c.color[0], c.color[1], c.color[2]);
+      doc.setLineWidth(0.8);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 5, 5, 'S');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(c.color[0], c.color[1], c.color[2]);
+      doc.text(c.label, x + cardWidth / 2, cardY + 13, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text(c.val, x + cardWidth / 2, cardY + 30, { align: 'center' });
+    });
+
+    // 4. Tabla con autoTable
+    const tableHeaders = [
+      ['N° Turno', 'Cajero', 'Apertura', 'Cierre', 'M. Inicial', 'Ventas Efec.', 'Esperado', 'Real Caja', 'Diferencia', 'Estado']
+    ];
+
+    const tableData = currentShiftsHistory.map(s => {
+      const initial = parseFloat(s.opening_amount) || 0;
+      const cashSales = parseFloat(s.cash_sales) || 0;
+      const expected = parseFloat(s.expected_cash) || 0;
+      const actual = s.actual_cash !== null ? parseFloat(s.actual_cash) : null;
+      const diff = s.difference !== null ? parseFloat(s.difference) : null;
+
+      let diffText = '--';
+      if (diff !== null) {
+        diffText = diff === 0 ? 'S/ 0.00 (OK)' : (diff > 0 ? `+ S/ ${diff.toFixed(2)}` : `- S/ ${Math.abs(diff).toFixed(2)}`);
+      }
+
+      return [
+        `#${String(s.id).padStart(4, '0')}`,
+        s.user_name || 'Cajero',
+        s.opened_at ? new Date(s.opened_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '--',
+        s.closed_at ? new Date(s.closed_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Abierta',
+        `S/ ${initial.toFixed(2)}`,
+        `S/ ${cashSales.toFixed(2)}`,
+        `S/ ${expected.toFixed(2)}`,
+        actual !== null ? `S/ ${actual.toFixed(2)}` : '--',
+        diffText,
+        s.status.toUpperCase()
+      ];
+    });
+
+    const tableFoot = [
+      [
+        'TOTALES',
+        '',
+        '',
+        '',
+        '',
+        `S/ ${totalCashSales.toFixed(2)}`,
+        '',
+        `S/ ${totalActual.toFixed(2)}`,
+        `${totalDiff >= 0 ? '+' : ''}S/ ${totalDiff.toFixed(2)}`,
+        ''
+      ]
+    ];
+
+    doc.autoTable({
+      head: tableHeaders,
+      body: tableData,
+      foot: tableFoot,
+      startY: 114,
+      margin: { left: 40, right: 40, bottom: 35 },
+      theme: 'striped',
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'center',
+        cellPadding: 4
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        cellPadding: 3.5,
+        textColor: [51, 65, 85]
+      },
+      footStyles: {
+        fillColor: [226, 232, 240],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        cellPadding: 4
+      },
+      columnStyles: {
+        0: { halign: 'center', fontStyle: 'bold', cellWidth: 55 },
+        1: { halign: 'left', cellWidth: 85 },
+        2: { halign: 'center', cellWidth: 85 },
+        3: { halign: 'center', cellWidth: 85 },
+        4: { halign: 'right', cellWidth: 70 },
+        5: { halign: 'right', fontStyle: 'bold', cellWidth: 75 },
+        6: { halign: 'right', cellWidth: 75 },
+        7: { halign: 'right', fontStyle: 'bold', textColor: [3, 105, 161], cellWidth: 75 },
+        8: { halign: 'right', fontStyle: 'bold', cellWidth: 80 },
+        9: { halign: 'center', fontStyle: 'bold', cellWidth: 60 }
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 8) {
+          const txt = String(data.cell.raw || '');
+          if (txt.startsWith('-')) data.cell.styles.textColor = [225, 29, 72];
+          else if (txt.startsWith('+') || txt.includes('(OK)')) data.cell.styles.textColor = [4, 120, 87];
+        }
+      },
+      didDrawPage: function(data) {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `VALEVENTAS POS | Soluciones de Punto de Venta & Facturación by VT VALETEC`,
+          40,
+          pageHeight - 15
+        );
+        doc.text(
+          `Página ${doc.internal.getCurrentPageInfo().pageNumber} de ${pageCount}`,
+          pageWidth - 40,
+          pageHeight - 15,
+          { align: 'right' }
+        );
+      }
+    });
+
+    const filename = `Reporte_Turnos_${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+    playBeep('success');
+  } catch (err) {
+    console.error('Error generando PDF de turnos:', err);
+    playBeep('error');
+    alert('❌ Error generando PDF: ' + err.message);
+  }
 }
 
 document.addEventListener('click', (e) => {
