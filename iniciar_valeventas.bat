@@ -25,10 +25,10 @@ echo.
 echo ============================================================
 echo  [EXITO] El sistema se ha iniciado correctamente.
 echo  Abriendo el Punto de Venta en tu navegador web...
-echo  Direccion: http://localhost:3000
+echo  Direccion: http://localhost:3005
 echo ============================================================
 echo.
 
 timeout /t 3 >nul
-start http://localhost:3000
+start http://localhost:3005
 exit
