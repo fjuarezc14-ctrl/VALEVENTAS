@@ -517,7 +517,17 @@ app.post('/api/customers', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('❌ Error registrando cliente:', err.message);
     if (err.code === '23505') {
-      return res.status(400).json({ error: '⚠️ Ya existe un cliente registrado con este Documento (DNI/RUC).' });
+      try {
+        const existing = await db.query('SELECT id, doc, name FROM customers WHERE doc = $1', [(doc || '').trim()]);
+        const existingCust = existing.rows[0] || null;
+        const custName = existingCust ? ` ("${existingCust.name}")` : '';
+        return res.status(400).json({ 
+          error: `⚠️ Ya existe un cliente registrado con este Documento (DNI/RUC)${custName}.`,
+          existingCustomer: existingCust
+        });
+      } catch (e) {
+        return res.status(400).json({ error: '⚠️ Ya existe un cliente registrado con este Documento (DNI/RUC).' });
+      }
     }
     res.status(500).json({ error: 'Error al registrar cliente.' });
   }

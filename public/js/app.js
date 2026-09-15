@@ -2961,13 +2961,23 @@ async function saveCustomer(e) {
       headers: getAuthHeaders(),
       body: JSON.stringify(payload)
     });
-    const newCust = await res.json();
-    if (!res.ok) throw new Error(newCust.error || 'Error al registrar cliente');
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.existingCustomer) {
+        playBeep('error');
+        if (confirm(`${data.error}\n\n¿Deseas seleccionar automáticamente a este cliente para la venta actual?`)) {
+          closeCustomerModal();
+          selectCustomerFromSearch(data.existingCustomer.id);
+          return;
+        }
+      }
+      throw new Error(data.error || 'Error al registrar cliente');
+    }
 
     closeCustomerModal();
     await loadCustomers();
-    if (newCust.id) {
-      selectCustomerFromSearch(newCust.id);
+    if (data.id) {
+      selectCustomerFromSearch(data.id);
     }
     playBeep('success');
     alert('✅ Cliente registrado con éxito y añadido a la cartera.');
